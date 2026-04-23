@@ -31,7 +31,7 @@
         type: dword
 
     - name: Habilitar reglas de firewall para RDP
-      ansible.windows.win_shell: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+      ansible.windows.win_shell: Enable-NetFirewallRule -Name "RemoteDesktop*"
       changed_when: false
 
     - name: Verificar si el servidor ya pertenece al dominio objetivo
