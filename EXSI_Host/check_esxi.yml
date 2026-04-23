@@ -1,0 +1,32 @@
+---
+- name: Test conexión con ESXi
+  hosts: localhost
+  gather_facts: no
+  collections:
+    - community.vmware
+
+  vars:
+    esxi_host: "172.17.25.20"
+    esxi_user: "root"
+    esxi_pass: "qwe123$"
+
+  tasks:
+    - name: Obtener versión de ESXi
+      community.vmware.vmware_host_facts:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+      register: esxi_info
+
+    - name: Mostrar información completa (opcional)
+      debug:
+        var: esxi_info
+
+    - name: Mostrar versión de ESXi (segura)
+      debug:
+        msg: >
+          Conectado a ESXi versión {{ esxi_info.ansible_facts.esxi_version | default('no detectada') }}
+          (build {{ esxi_info.ansible_facts.esxi_build | default('desconocido') }},
+          host: {{ esxi_info.ansible_facts.esxi_hostname | default('sin nombre') }})
+

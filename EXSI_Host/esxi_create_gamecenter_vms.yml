@@ -1,0 +1,160 @@
+---
+- hosts: localhost
+  gather_facts: no
+  collections:
+    - community.vmware
+
+  vars:
+    esxi_host: "168.121.48.254:10120"
+    esxi_user: "root"
+    esxi_pass: "qwe123$"
+    esxi_hostname_fqdn: "localhost.lim.upeu.edu.pe"
+    ds_name: "datastore1"
+
+    # Carpeta dentro del datastore donde están las ISOs
+    iso_folder: "MartinezG01VI"
+
+    # Portgroups
+    pg_main: "vSW_G01"
+    pg_extra: "VM Network"   # solo para Windows Server (segunda NIC)
+
+    # Definición de VMs a crear
+    vms:
+      - name: "Bazzite_pc02_G01"
+        guest_id: "fedora64Guest"
+        memory_mb: 8192
+        num_cpus: 4
+        disk_gb: 60
+        iso_file: "bazzite-stable-amd64.iso"
+        networks:
+          - name: "{{ pg_extra }}"
+            start_connected: true
+            device_type: vmxnet3
+
+      - name: "Windows11pro_pc01_G01"
+        guest_id: "windows11_64Guest"
+        memory_mb: 8192
+        num_cpus: 4
+        disk_gb: 60
+        iso_file: "Win11_25H2_Spanish_x64.iso"
+        firmware: "efi"
+        networks:
+          - name: "{{ pg_main }}"
+            start_connected: true
+            device_type: vmxnet3
+
+      - name: "WindowsServer_G01"
+        guest_id: "windows2016_64Guest"  # O usa la versión adecuada, como windows2019_64Guest o windows2022_64Guest
+        memory_mb: 8192  # Ajusta según los requisitos del servidor
+        num_cpus: 4  # Ajusta según los requisitos del servidor
+        disk_gb: 50  # Ajusta el tamaño del disco según sea necesario
+        iso_file: "WindowsServer2022_64bit.iso"  # Asegúrate de que la ISO de Windows Server esté en el datastore
+        firmware: "efi"  # Utiliza "efi" si el servidor requiere UEFI, o "bios" si utiliza BIOS tradicional
+        networks:
+          - name: "{{ pg_main }}"  # Primer adaptador, conectado a pg_main
+            start_connected: true
+            device_type: vmxnet3  # El adaptador vmxnet3 es el recomendado para máquinas virtuales
+          - name: "{{ pg_extra }}"  # Segundo adaptador, conectado a pg_extra
+            start_connected: true
+            device_type: vmxnet3  # Utilizando el mismo tipo de adaptador para la segunda red
+
+
+  tasks:
+
+    - name: Crear/asegurar VMs (hardware + disco)
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: present
+        guest_id: "{{ item.guest_id }}"
+        datastore: "{{ ds_name }}"
+        hardware:
+          memory_mb: "{{ item.memory_mb }}"
+          num_cpus: "{{ item.num_cpus }}"
+          scsi: paravirtual
+          boot_firmware: "{{ item.firmware | default(omit) }}"
+        disk:
+          - size_gb: "{{ item.disk_gb }}"
+            type: thin
+            datastore: "{{ ds_name }}"
+        wait_for_ip_address: no
+        state_change_timeout: 180
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Añadir/asegurar NICs según cada VM
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: present
+        networks: "{{ item.networks }}"
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Apagar VMs para montar ISO
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: poweredoff
+      ignore_errors: true
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # ✅ Bloque corregido con "include_tasks" para evitar error de loop
+    - name: Montar ISO (IDE 0:0) con fallback a SATA 0:0
+      include_tasks: mount_iso_block.yml
+      loop: "{{ vms }}"
+      loop_control:
+        loop_var: item
+
+    - name: Encender VMs
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: poweredon
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Info de cada VM
+      community.vmware.vmware_guest_info:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+        name: "{{ item.name }}"
+      register: infos
+      loop: "{{ vms }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Dump breve de dispositivos por VM
+      debug:
+        msg:
+          - "VM: {{ item.invocation.module_args.name }}"
+          - "CD/DVD: {{ (item.instance.guest_devices | selectattr('type','equalto','cdrom') | list) | default([]) }}"
+          - "NICs: {{ item.instance.networks | default([]) }}"
+      loop: "{{ infos.results }}"

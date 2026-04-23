@@ -1,0 +1,36 @@
+---
+- block:
+    - name: Montar ISO por IDE en {{ item.name }}
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: present
+        cdrom:
+          - type: iso
+            iso_path: "[{{ ds_name }}] {{ iso_folder }}/{{ item.iso_file }}"
+            controller_type: ide
+            controller_number: 0
+            unit_number: 0
+
+  rescue:
+    - name: Montar ISO por SATA en {{ item.name }} (fallback)
+      community.vmware.vmware_guest:
+        hostname: "{{ esxi_host }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: no
+        esxi_hostname: "{{ esxi_hostname_fqdn }}"
+        folder: "/"
+        name: "{{ item.name }}"
+        state: present
+        cdrom:
+          - type: iso
+            iso_path: "[{{ ds_name }}] {{ iso_folder }}/{{ item.iso_file }}"
+            controller_type: sata
+            controller_number: 0
+            unit_number: 0

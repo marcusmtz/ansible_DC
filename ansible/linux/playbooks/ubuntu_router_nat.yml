@@ -1,0 +1,122 @@
+---
+- name: Configurar Ubuntu Server como router NAT sin tocar la WAN
+  hosts: ubuntu_router
+  become: true
+
+  vars:
+    wan_interface: ens34
+    lan_interface: ens35
+    lan_address: "192.168.10.1/24"
+    netplan_file: /etc/netplan/50-cloud-init.yaml
+
+    nameservers:
+      - "8.8.8.8"
+      - "1.1.1.1"
+      - "192.168.13.96"
+      - "192.168.13.97"
+
+  tasks:
+    - name: Instalar paquetes necesarios
+      ansible.builtin.apt:
+        name:
+          - iptables
+          - iptables-persistent
+          - netfilter-persistent
+        state: present
+        update_cache: true
+
+    - name: Cargar netplan actual
+      ansible.builtin.slurp:
+        path: "{{ netplan_file }}"
+      register: netplan_raw
+
+    - name: Parsear netplan actual
+      ansible.builtin.set_fact:
+        netplan_current: "{{ netplan_raw.content | b64decode | from_yaml }}"
+
+    - name: Construir netplan actualizado (LAN + DNS en WAN)
+      ansible.builtin.set_fact:
+        netplan_updated: >-
+          {{
+            netplan_current
+            | combine(
+                {
+                  'network': {
+                    'version': (netplan_current.network.version | default(2)),
+                    'renderer': (netplan_current.network.renderer | default('networkd')),
+                    'ethernets': {
+                      (lan_interface): {
+                        'dhcp4': false,
+                        'addresses': [lan_address]
+                      },
+                      (wan_interface): {
+                        'nameservers': {
+                          'addresses': nameservers
+                        }
+                      }
+                    }
+                  }
+                },
+                recursive=True
+              )
+          }}
+
+    - name: Escribir netplan principal sin tocar la WAN
+      ansible.builtin.copy:
+        dest: "{{ netplan_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        content: "{{ netplan_updated | to_nice_yaml(indent=2, sort_keys=False) }}"
+      notify: Apply netplan
+
+    - name: Activar IPv4 forwarding en sysctl
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.conf
+        regexp: '^#?\s*net\.ipv4\.ip_forward\s*='
+        line: 'net.ipv4.ip_forward=1'
+        state: present
+      notify: Apply sysctl
+
+    - name: Aplicar IPv4 forwarding inmediatamente
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        state: present
+        reload: true
+
+    - name: Agregar regla NAT MASQUERADE
+      ansible.builtin.shell: |
+        iptables -t nat -C POSTROUTING -o {{ wan_interface }} -j MASQUERADE || \
+        iptables -t nat -A POSTROUTING -o {{ wan_interface }} -j MASQUERADE
+      args:
+        executable: /bin/bash
+
+    - name: Permitir forwarding de LAN hacia WAN
+      ansible.builtin.shell: |
+        iptables -C FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT || \
+        iptables -A FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT
+      args:
+        executable: /bin/bash
+
+    - name: Permitir trafico de retorno WAN hacia LAN
+      ansible.builtin.shell: |
+        iptables -C FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
+        iptables -A FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+      args:
+        executable: /bin/bash
+
+    - name: Guardar reglas iptables
+      ansible.builtin.shell: netfilter-persistent save
+      args:
+        executable: /bin/bash
+
+  handlers:
+    - name: Apply netplan
+      ansible.builtin.shell: netplan generate && netplan apply
+      args:
+        executable: /bin/bash
+
+    - name: Apply sysctl
+      ansible.builtin.command: sysctl -p
