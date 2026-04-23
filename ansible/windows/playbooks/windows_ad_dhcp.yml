@@ -6,7 +6,7 @@
   vars:
     domain_fqdn: marqcord.internal
     domain_netbios: "{{ domain_fqdn.split('.')[0] | upper }}"
-    dsrm_password: "{{ lookup('env', 'AD_DSRM_PASSWORD') | default('', true) }}"
+    dsrm_password: "mrk87dwp"
 
   tasks:
     - name: Validar password para modo restauracion (DSRM)
