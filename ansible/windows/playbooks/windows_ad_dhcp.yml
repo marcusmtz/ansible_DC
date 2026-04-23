@@ -13,7 +13,7 @@
       ansible.builtin.assert:
         that:
           - dsrm_password | length >= 8
-        fail_msg: "Define la variable de entorno AD_DSRM_PASSWORD con al menos 8 caracteres."
+        fail_msg: "Define dsrm_password con al menos 8 caracteres."
 
     - name: Instalar roles AD DS y DNS
       ansible.windows.win_feature:
@@ -61,8 +61,18 @@
     - name: Reiniciar despues de crear el bosque
       ansible.windows.win_reboot:
         msg: Reinicio requerido por instalacion de AD DS
+        reboot_timeout: 600
         pre_reboot_delay: 15
         post_reboot_delay: 60
+      when: forest_install is changed
+
+    - name: Esperar a que WinRM vuelva
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 5985
+        timeout: 600
+      delegate_to: localhost
+      become: false
       when: forest_install is changed
 
     - name: Instalar rol DHCP (sin pools)
