@@ -1,0 +1,35 @@
+---
+- name: Fase 2 - Post configuracion con usuario de dominio
+  hosts: windows_domain
+  gather_facts: false
+
+  tasks:
+    - name: Esperar a WinRM
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 5985
+        timeout: 900
+      delegate_to: localhost
+      become: false
+
+    - name: Instalar DHCP (sin pools)
+      ansible.windows.win_feature:
+        name: DHCP
+        state: present
+        include_management_tools: true
+      register: dhcp_install
+
+    - name: Reiniciar despues de instalar DHCP si es necesario
+      ansible.windows.win_reboot:
+        reboot_timeout: 1200
+        post_reboot_delay: 45
+      when: dhcp_install.reboot_required | default(false)
+
+    - name: Validar identidad actual
+      ansible.windows.win_shell: whoami
+      register: whoami_out
+      changed_when: false
+
+    - name: Mostrar identidad
+      ansible.builtin.debug:
+        var: whoami_out.stdout

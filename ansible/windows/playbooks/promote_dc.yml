@@ -1,0 +1,48 @@
+---
+- name: Fase 1 - Promocion con usuario local
+  hosts: windows_local
+  gather_facts: false
+
+  vars:
+    domain_name: marqcord.internal
+    netbios_name: MARQCORD
+    dsrm_password: "Mrk87dwp!"
+
+  tasks:
+    - name: Validar password para modo restauracion (DSRM)
+      ansible.builtin.assert:
+        that:
+          - dsrm_password | length >= 8
+        fail_msg: "Define dsrm_password con al menos 8 caracteres."
+
+    - name: Instalar AD DS y DNS
+      ansible.windows.win_feature:
+        name:
+          - AD-Domain-Services
+          - DNS
+        state: present
+        include_management_tools: true
+
+    - name: Habilitar escritorio remoto (RDP)
+      ansible.windows.win_regedit:
+        path: HKLM:\System\CurrentControlSet\Control\Terminal Server
+        name: fDenyTSConnections
+        data: 0
+        type: dword
+
+    - name: Habilitar reglas de firewall para RDP
+      ansible.windows.win_shell: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+      changed_when: false
+
+    - name: Crear nuevo bosque con DNS integrado
+      microsoft.ad.domain:
+        dns_domain_name: "{{ domain_name }}"
+        domain_netbios_name: "{{ netbios_name }}"
+        safe_mode_password: "{{ dsrm_password }}"
+      register: domain_create
+
+    - name: Reiniciar si es necesario
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+        post_reboot_delay: 60
+      when: domain_create.reboot_required | default(false)
