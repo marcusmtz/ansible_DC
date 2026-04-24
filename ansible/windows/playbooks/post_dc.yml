@@ -45,6 +45,18 @@
       register: dhcp_authorize
       changed_when: "'AUTHORIZED' in dhcp_authorize.stdout"
 
+    - name: Permitir transferencia de zona a DNS secundario
+      ansible.windows.win_shell: |
+        dnscmd localhost /ZoneResetSecondaries marqcord.internal /securelist 192.168.10.6
+      register: zone_xfer
+      changed_when: "'Command completed successfully' in zone_xfer.stdout"
+
+    - name: Configurar notificaciones DNS al secundario
+      ansible.windows.win_shell: |
+        dnscmd localhost /ZoneResetNotify marqcord.internal /list 192.168.10.6
+      register: zone_notify
+      changed_when: "'Command completed successfully' in zone_notify.stdout"
+
     - name: Validar identidad actual
       ansible.windows.win_shell: whoami
       register: whoami_out
