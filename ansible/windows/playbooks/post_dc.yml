@@ -53,7 +53,7 @@
 
     - name: Configurar notify DNS para secundarios
       ansible.windows.win_shell: |
-        Set-DnsServerPrimaryZone -Name "marqcord.internal" -Notify Servers
+        Set-DnsServerPrimaryZone -Name "marqcord.internal" -Notify Notify
       register: zone_notify
       changed_when: true
 
