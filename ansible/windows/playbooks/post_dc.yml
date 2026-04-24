@@ -53,7 +53,7 @@
 
     - name: Configurar notificaciones DNS al secundario
       ansible.windows.win_shell: |
-        dnscmd localhost /ZoneResetNotify marqcord.internal /list 192.168.10.6
+        dnscmd localhost /ZoneResetNotify marqcord.internal /NotifyServers 192.168.10.6
       register: zone_notify
       changed_when: "'Command completed successfully' in zone_notify.stdout"
 
