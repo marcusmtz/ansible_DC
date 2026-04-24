@@ -1,0 +1,101 @@
+---
+- name: Configurar Ubuntu como file server (Samba)
+  hosts: ubuntu_file_server
+  become: true
+
+  vars:
+    smb_share_name: Compartido
+    smb_share_path: /srv/samba/compartido
+    smb_group: sambausers
+    smb_user: fileserver
+    smb_password: mrk87dwp
+
+  pre_tasks:
+    - name: Validar credenciales de Samba
+      ansible.builtin.assert:
+        that:
+          - smb_user | length > 0
+          - smb_password | length >= 8
+        fail_msg: "Define smb_user y smb_password validos (minimo 8 caracteres)."
+
+  tasks:
+    - name: Instalar Samba
+      ansible.builtin.apt:
+        name:
+          - samba
+        state: present
+        update_cache: true
+
+    - name: Crear grupo para acceso al recurso compartido
+      ansible.builtin.group:
+        name: "{{ smb_group }}"
+        state: present
+
+    - name: Crear usuario local para Samba
+      ansible.builtin.user:
+        name: "{{ smb_user }}"
+        shell: /usr/sbin/nologin
+        create_home: false
+        groups: "{{ smb_group }}"
+        append: true
+        state: present
+
+    - name: Verificar si el usuario ya existe en Samba
+      ansible.builtin.command: pdbedit -L -u "{{ smb_user }}"
+      register: smb_user_exists
+      failed_when: false
+      changed_when: false
+
+    - name: Crear usuario en base de datos Samba
+      ansible.builtin.shell: |
+        (echo "{{ smb_password }}"; echo "{{ smb_password }}") | smbpasswd -s -a "{{ smb_user }}"
+      args:
+        executable: /bin/bash
+      when: smb_user_exists.rc != 0
+
+    - name: Crear carpeta del recurso compartido
+      ansible.builtin.file:
+        path: "{{ smb_share_path }}"
+        state: directory
+        owner: root
+        group: "{{ smb_group }}"
+        mode: "2770"
+
+    - name: Configurar recurso compartido en smb.conf
+      ansible.builtin.blockinfile:
+        path: /etc/samba/smb.conf
+        marker: "; {mark} ANSIBLE FILE SERVER"
+        block: |
+          [{{ smb_share_name }}]
+          path = {{ smb_share_path }}
+          browseable = yes
+          read only = no
+          guest ok = no
+          valid users = @{{ smb_group }}
+          force group = {{ smb_group }}
+          create mask = 0660
+          directory mask = 2770
+      notify: Restart samba
+
+    - name: Validar configuracion de Samba
+      ansible.builtin.command: testparm -s
+      register: samba_config_test
+      changed_when: false
+
+    - name: Habilitar y arrancar servicio smbd
+      ansible.builtin.service:
+        name: smbd
+        enabled: true
+        state: started
+
+    - name: Permitir Samba en UFW si esta activo
+      ansible.builtin.command: ufw allow Samba
+      register: ufw_samba
+      changed_when: "'Rule added' in ufw_samba.stdout or 'updated' in ufw_samba.stdout"
+      failed_when: false
+
+  handlers:
+    - name: Restart samba
+      ansible.builtin.service:
+        name: smbd
+        state: restarted
