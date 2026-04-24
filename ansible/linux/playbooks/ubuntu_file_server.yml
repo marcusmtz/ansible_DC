@@ -61,6 +61,24 @@
         group: "{{ smb_group }}"
         mode: "2770"
 
+    - name: Configurar protocolo minimo SMB en global
+      ansible.builtin.ini_file:
+        path: /etc/samba/smb.conf
+        section: global
+        option: server min protocol
+        value: SMB2
+        no_extra_spaces: true
+      notify: Restart samba
+
+    - name: Configurar protocolo maximo SMB en global
+      ansible.builtin.ini_file:
+        path: /etc/samba/smb.conf
+        section: global
+        option: server max protocol
+        value: SMB3
+        no_extra_spaces: true
+      notify: Restart samba
+
     - name: Configurar recurso compartido en smb.conf
       ansible.builtin.blockinfile:
         path: /etc/samba/smb.conf
