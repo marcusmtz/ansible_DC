@@ -1,0 +1,87 @@
+---
+- name: Configurar Ubuntu como DNS secundario (BIND9)
+  hosts: ubuntu_dns_secondary
+  become: true
+
+  vars:
+    dns_listen_ip: "192.168.10.6"
+    dns_master_ip: "192.168.10.5"
+    dns_zones:
+      - "marqcord.internal"
+
+  tasks:
+    - name: Instalar paquetes DNS
+      ansible.builtin.apt:
+        name:
+          - bind9
+          - bind9-utils
+          - dnsutils
+        state: present
+        update_cache: true
+
+    - name: Configurar opciones globales de BIND
+      ansible.builtin.copy:
+        dest: /etc/bind/named.conf.options
+        owner: root
+        group: bind
+        mode: "0644"
+        content: |
+          options {
+              directory "/var/cache/bind";
+
+              recursion yes;
+              allow-recursion { any; };
+              allow-query { any; };
+
+              listen-on { 127.0.0.1; {{ dns_listen_ip }}; };
+              listen-on-v6 { any; };
+
+              dnssec-validation auto;
+          };
+      notify: Restart bind9
+
+    - name: Configurar zonas secundarias en named.conf.local
+      ansible.builtin.copy:
+        dest: /etc/bind/named.conf.local
+        owner: root
+        group: bind
+        mode: "0644"
+        content: |
+          {% for zone_name in dns_zones %}
+          zone "{{ zone_name }}" {
+              type slave;
+              file "/var/cache/bind/db.{{ zone_name }}";
+              masters { {{ dns_master_ip }}; };
+          };
+
+          {% endfor %}
+      notify: Restart bind9
+
+    - name: Validar configuracion de BIND
+      ansible.builtin.command: named-checkconf
+      register: bind_check
+      changed_when: false
+
+    - name: Habilitar y arrancar bind9
+      ansible.builtin.service:
+        name: bind9
+        enabled: true
+        state: started
+
+    - name: Permitir DNS TCP en UFW si esta activo
+      ansible.builtin.command: ufw allow 53/tcp
+      register: ufw_dns_tcp
+      changed_when: "'Rule added' in ufw_dns_tcp.stdout or 'updated' in ufw_dns_tcp.stdout"
+      failed_when: false
+
+    - name: Permitir DNS UDP en UFW si esta activo
+      ansible.builtin.command: ufw allow 53/udp
+      register: ufw_dns_udp
+      changed_when: "'Rule added' in ufw_dns_udp.stdout or 'updated' in ufw_dns_udp.stdout"
+      failed_when: false
+
+  handlers:
+    - name: Restart bind9
+      ansible.builtin.service:
+        name: bind9
+        state: restarted
