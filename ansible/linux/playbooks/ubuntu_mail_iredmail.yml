@@ -1,0 +1,169 @@
+---
+- name: Configurar Ubuntu como servidor de correo iRedMail
+  hosts: ubuntu_mail
+  become: true
+
+  vars:
+    hostname_mail: mail
+    domain_mail: marqcord.local
+    fqdn: "{{ hostname_mail }}.{{ domain_mail }}"
+    mail_ip: "192.168.10.9"
+    dns_master_ip: "192.168.10.5"
+    iredmail_version: "1.7.2"
+
+  tasks:
+    - name: Actualizar paquetes
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+
+    - name: Instalar dependencias basicas
+      ansible.builtin.apt:
+        name:
+          - wget
+          - curl
+          - vim
+          - net-tools
+          - unzip
+          - software-properties-common
+        state: present
+
+    - name: Instalar UFW
+      ansible.builtin.apt:
+        name:
+          - ufw
+        state: present
+
+    - name: Configurar timezone
+      ansible.builtin.timezone:
+        name: America/Lima
+
+    - name: Configurar hostname
+      ansible.builtin.hostname:
+        name: "{{ hostname_mail }}"
+
+    - name: Configurar /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ mail_ip }} {{ fqdn }} {{ hostname_mail }}"
+        create: true
+
+    - name: Agregar entrada para DNS en /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ dns_master_ip }} dc1.marqcord.local dc1"
+        create: true
+
+    - name: Habilitar UFW
+      ansible.builtin.ufw:
+        state: enabled
+
+    - name: Permitir SSH
+      ansible.builtin.ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: Permitir HTTP
+      ansible.builtin.ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Permitir HTTPS
+      ansible.builtin.ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+
+    - name: Permitir SMTP
+      ansible.builtin.ufw:
+        rule: allow
+        port: '25'
+        proto: tcp
+
+    - name: Permitir SMTP Submission
+      ansible.builtin.ufw:
+        rule: allow
+        port: '587'
+        proto: tcp
+
+    - name: Permitir IMAP
+      ansible.builtin.ufw:
+        rule: allow
+        port: '143'
+        proto: tcp
+
+    - name: Permitir IMAPS
+      ansible.builtin.ufw:
+        rule: allow
+        port: '993'
+        proto: tcp
+
+    - name: Permitir POP3
+      ansible.builtin.ufw:
+        rule: allow
+        port: '110'
+        proto: tcp
+
+    - name: Permitir POP3S
+      ansible.builtin.ufw:
+        rule: allow
+        port: '995'
+        proto: tcp
+
+    - name: Descargar iRedMail
+      ansible.builtin.get_url:
+        url: "https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz"
+        dest: /opt/iredmail.tar.gz
+        mode: '0644'
+
+    - name: Extraer iRedMail
+      ansible.builtin.unarchive:
+        src: /opt/iredmail.tar.gz
+        dest: /opt/
+        remote_src: true
+        creates: "/opt/iRedMail-{{ iredmail_version }}"
+
+    - name: Crear archivo de respuestas para instalacion no interactiva
+      ansible.builtin.copy:
+        dest: /opt/iRedMail-{{ iredmail_version }}/config
+        mode: '0600'
+        content: |
+          # Configuracion de respuesta para instalacion automatica de iRedMail
+          
+          # Direccion IP del servidor de correo
+          export MAIL_IP="{{ mail_ip }}"
+          
+          # Nombre de host y dominio
+          export HOSTNAME="{{ hostname_mail }}"
+          export DOMAIN="{{ domain_mail }}"
+          
+          # Contraseña de admin de iRedMail
+          export FIRST_MAIL_DOMAIN="{{ domain_mail }}"
+          export FIRST_MAIL_DOMAIN_ADMIN_PASSWORD="Mrk87dwp_"
+          export FIRST_MAIL_DOMAIN_QUOTA="1024"
+          
+          # Componentes a instalar (todos)
+          export USE_IREDADMIN="YES"
+          export USE_ROUNDCUBE="YES"
+          export USE_SOGO="YES"
+          export USE_NETDATA="YES"
+          export USE_FAIL2BAN="YES"
+          export USE_CLAWMAIL="YES"
+          
+          # Puerto para SOGo
+          export SOGO_PORT=20000
+
+    - name: Mostrar mensaje de siguiente paso
+      ansible.builtin.debug:
+        msg: |
+          ===========================================================
+          El playbook ha preparado el servidor para iRedMail.
+          Para completar la instalacion, ejecuta manualmente:
+          
+          cd /opt/iRedMail-{{ iredmail_version }}
+          sudo bash iRedMail.sh
+          
+          O usa el archivo de respuestas creado en /opt/iRedMail-{{ iredmail_version }}/config
+          ===========================================================
