@@ -1,0 +1,241 @@
+---
+- name: Configurar Ubuntu Router BACKUP con balanceo ECMP y VRRP
+  hosts: ubuntu_router_backup
+  become: true
+
+  vars:
+    wan_interface: ens34
+    wan1_address: "172.17.25.107/26"
+    wan1_gateway: "172.17.25.121"
+    wan2_interface: ens36
+    wan2_address: "168.17.25.3/29"
+    wan2_gateway: "168.17.25.1"
+    lan_interface: ens35
+    lan_address: "192.168.10.3/24"
+    virtual_ip: "192.168.10.1/24"
+    vrrp_state: BACKUP
+    vrrp_priority: 100
+    vrrp_router_id: 10
+    vrrp_auth_pass: VRRP_PASS_2024
+    netplan_file: /etc/netplan/50-cloud-init.yaml
+    nameservers:
+      - "8.8.8.8"
+      - "1.1.1.1"
+      - "192.168.13.96"
+      - "192.168.13.97"
+
+  tasks:
+    - name: Instalar paquetes necesarios
+      ansible.builtin.apt:
+        name:
+          - iptables
+          - iptables-persistent
+          - netfilter-persistent
+          - keepalived
+        state: present
+        update_cache: true
+
+    - name: Cargar netplan actual
+      ansible.builtin.slurp:
+        path: "{{ netplan_file }}"
+      register: netplan_raw
+
+    - name: Parsear netplan actual
+      ansible.builtin.set_fact:
+        netplan_current: "{{ netplan_raw.content | b64decode | from_yaml }}"
+
+    - name: Construir netplan actualizado (WAN1 + WAN2 estaticas)
+      ansible.builtin.set_fact:
+        netplan_updated: >-
+          {{
+            netplan_current
+            | combine(
+                {
+                  'network': {
+                    'version': (netplan_current.network.version | default(2)),
+                    'renderer': (netplan_current.network.renderer | default('networkd')),
+                    'ethernets': {
+                      (lan_interface): {
+                        'dhcp4': false,
+                        'addresses': [lan_address]
+                      },
+                      (wan_interface): {
+                        'dhcp4': false,
+                        'addresses': [wan1_address],
+                        'gateway4': wan1_gateway,
+                        'nameservers': {
+                          'addresses': nameservers
+                        }
+                      },
+                      (wan2_interface): {
+                        'dhcp4': false,
+                        'addresses': [wan2_address]
+                      }
+                    }
+                  }
+                },
+                recursive=True
+              )
+          }}
+
+    - name: Escribir netplan principal
+      ansible.builtin.copy:
+        dest: "{{ netplan_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        content: "{{ netplan_updated | to_nice_yaml(indent=2, sort_keys=False) }}"
+      notify: Apply netplan
+
+    - name: Forzar aplicacion de netplan antes de continuar
+      ansible.builtin.meta: flush_handlers
+
+    - name: Activar IPv4 forwarding en sysctl
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.conf
+        regexp: '^#?\s*net\.ipv4\.ip_forward\s*='
+        line: 'net.ipv4.ip_forward=1'
+        state: present
+      notify: Apply sysctl
+
+    - name: Aplicar IPv4 forwarding inmediatamente
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        state: present
+        reload: true
+
+    - name: Agregar regla NAT MASQUERADE WAN1
+      ansible.builtin.shell: |
+        iptables -t nat -C POSTROUTING -o {{ wan_interface }} -j MASQUERADE || \
+        iptables -t nat -A POSTROUTING -o {{ wan_interface }} -j MASQUERADE
+      args:
+        executable: /bin/bash
+
+    - name: Agregar regla NAT MASQUERADE WAN2
+      ansible.builtin.shell: |
+        iptables -t nat -C POSTROUTING -o {{ wan2_interface }} -j MASQUERADE || \
+        iptables -t nat -A POSTROUTING -o {{ wan2_interface }} -j MASQUERADE
+      args:
+        executable: /bin/bash
+
+    - name: Permitir forwarding de LAN hacia WAN1
+      ansible.builtin.shell: |
+        iptables -C FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT || \
+        iptables -A FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT
+      args:
+        executable: /bin/bash
+
+    - name: Permitir forwarding de LAN hacia WAN2
+      ansible.builtin.shell: |
+        iptables -C FORWARD -i {{ lan_interface }} -o {{ wan2_interface }} -j ACCEPT || \
+        iptables -A FORWARD -i {{ lan_interface }} -o {{ wan2_interface }} -j ACCEPT
+      args:
+        executable: /bin/bash
+
+    - name: Permitir trafico de retorno WAN1 hacia LAN
+      ansible.builtin.shell: |
+        iptables -C FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
+        iptables -A FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+      args:
+        executable: /bin/bash
+
+    - name: Permitir trafico de retorno WAN2 hacia LAN
+      ansible.builtin.shell: |
+        iptables -C FORWARD -i {{ wan2_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
+        iptables -A FORWARD -i {{ wan2_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+      args:
+        executable: /bin/bash
+
+    - name: Permitir trafico VRRP en LAN
+      ansible.builtin.shell: |
+        iptables -C INPUT -i {{ lan_interface }} -p vrrp -j ACCEPT || \
+        iptables -A INPUT -i {{ lan_interface }} -p vrrp -j ACCEPT
+      args:
+        executable: /bin/bash
+
+    - name: Configurar ECMP multipath routing
+      ansible.builtin.shell: |
+        ip route replace default scope global \
+          nexthop via {{ wan1_gateway }} dev {{ wan_interface }} weight 1 \
+          nexthop via {{ wan2_gateway }} dev {{ wan2_interface }} weight 1
+      args:
+        executable: /bin/bash
+
+    - name: Crear servicio systemd para persistencia ECMP
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ecmp-loadbalance.service
+        content: |
+          [Unit]
+          Description=ECMP load balancing for dual WAN
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/sbin/ip route replace default scope global nexthop via {{ wan1_gateway }} dev {{ wan_interface }} weight 1 nexthop via {{ wan2_gateway }} dev {{ wan2_interface }} weight 1
+          RemainAfterExit=true
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Habilitar e iniciar servicio ECMP
+      ansible.builtin.systemd:
+        name: ecmp-loadbalance
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Configurar keepalived VRRP
+      ansible.builtin.copy:
+        dest: /etc/keepalived/keepalived.conf
+        content: |
+          vrrp_instance LAN_VIP {
+              state {{ vrrp_state }}
+              interface {{ lan_interface }}
+              virtual_router_id {{ vrrp_router_id }}
+              priority {{ vrrp_priority }}
+              advert_int 1
+
+              authentication {
+                  auth_type PASS
+                  auth_pass {{ vrrp_auth_pass }}
+              }
+
+              virtual_ipaddress {
+                  {{ virtual_ip }} dev {{ lan_interface }}
+              }
+          }
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart keepalived
+
+    - name: Iniciar y habilitar keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        enabled: true
+        state: started
+
+    - name: Guardar reglas iptables
+      ansible.builtin.shell: netfilter-persistent save
+      args:
+        executable: /bin/bash
+
+  handlers:
+    - name: Apply netplan
+      ansible.builtin.shell: netplan generate && netplan apply
+      args:
+        executable: /bin/bash
+
+    - name: Apply sysctl
+      ansible.builtin.command: sysctl -p
+
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted

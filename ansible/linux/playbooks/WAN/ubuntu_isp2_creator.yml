@@ -1,12 +1,12 @@
 ---
-- name: Configurar Ubuntu Server como router NAT sin tocar la WAN
-  hosts: ubuntu_router
+- name: Configurar ISP2_creator como router NAT sin tocar la WAN
+  hosts: isp2_creator
   become: true
 
   vars:
     wan_interface: ens34
     lan_interface: ens35
-    lan_address: "192.168.10.1/24"
+    lan_address: "168.17.25.1/29"
     netplan_file: /etc/netplan/50-cloud-init.yaml
 
     nameservers:
