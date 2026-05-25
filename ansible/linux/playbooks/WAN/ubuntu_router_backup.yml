@@ -1,5 +1,5 @@
 ---
-- name: Configurar Ubuntu Router BACKUP con balanceo ECMP y VRRP
+- name: Configurar Ubuntu Router BACKUP con balanceo ECMP, VRRP y VLANs
   hosts: ubuntu_router_backup
   become: true
 
@@ -7,15 +7,33 @@
     wan_interface: ens34
     wan1_address: "172.17.25.107/26"
     wan1_gateway: "172.17.25.121"
-    wan2_interface: ens36
+    wan2_interface: ens35
     wan2_address: "168.17.25.3/29"
     wan2_gateway: "168.17.25.1"
-    lan_interface: ens35
-    lan_address: "192.168.10.3/24"
-    virtual_ip: "192.168.10.1/24"
+
+    # Trunk LAN - sin IP propia
+    trunk_interface: ens38
+
+    # VLANs
+    vlans:
+      - id: 10
+        name: servidores
+        address: "192.168.10.3/24"
+        vip: "192.168.10.1/24"
+        vrrp_id: 10
+      - id: 20
+        name: trabajadores
+        address: "192.168.20.3/24"
+        vip: "192.168.20.1/24"
+        vrrp_id: 20
+      - id: 30
+        name: invitados
+        address: "192.168.30.3/24"
+        vip: "192.168.30.1/24"
+        vrrp_id: 30
+
     vrrp_state: BACKUP
     vrrp_priority: 100
-    vrrp_router_id: 10
     vrrp_auth_pass: VRRP_PASS_2024
     netplan_file: /etc/netplan/50-cloud-init.yaml
     nameservers:
@@ -32,66 +50,65 @@
           - iptables-persistent
           - netfilter-persistent
           - keepalived
+          - vlan
         state: present
         update_cache: true
 
-    - name: Cargar netplan actual
-      ansible.builtin.slurp:
-        path: "{{ netplan_file }}"
-      register: netplan_raw
+    - name: Cargar modulo 8021q para VLANs
+      community.general.modprobe:
+        name: 8021q
+        state: present
 
-    - name: Parsear netplan actual
-      ansible.builtin.set_fact:
-        netplan_current: "{{ netplan_raw.content | b64decode | from_yaml }}"
+    - name: Persistir modulo 8021q
+      ansible.builtin.lineinfile:
+        path: /etc/modules
+        line: 8021q
+        state: present
 
-    - name: Construir netplan actualizado (WAN1 + WAN2 estaticas)
-      ansible.builtin.set_fact:
-        netplan_updated: >-
-          {{
-            netplan_current
-            | combine(
-                {
-                  'network': {
-                    'version': (netplan_current.network.version | default(2)),
-                    'renderer': (netplan_current.network.renderer | default('networkd')),
-                    'ethernets': {
-                      (lan_interface): {
-                        'dhcp4': false,
-                        'addresses': [lan_address]
-                      },
-                      (wan_interface): {
-                        'dhcp4': false,
-                        'addresses': [wan1_address],
-                        'gateway4': wan1_gateway,
-                        'nameservers': {
-                          'addresses': nameservers
-                        }
-                      },
-                      (wan2_interface): {
-                        'dhcp4': false,
-                        'addresses': [wan2_address]
-                      }
-                    }
-                  }
-                },
-                recursive=True
-              )
-          }}
-
-    - name: Escribir netplan principal
+    - name: Escribir netplan con trunk y subinterfaces VLAN
       ansible.builtin.copy:
         dest: "{{ netplan_file }}"
         owner: root
         group: root
         mode: "0644"
         backup: true
-        content: "{{ netplan_updated | to_nice_yaml(indent=2, sort_keys=False) }}"
+        content: |
+          network:
+            version: 2
+            renderer: networkd
+            ethernets:
+              {{ wan_interface }}:
+                dhcp4: false
+                addresses: [{{ wan1_address }}]
+                nameservers:
+                  addresses: {{ nameservers | to_json }}
+              {{ wan2_interface }}:
+                dhcp4: false
+                addresses: [{{ wan2_address }}]
+              {{ trunk_interface }}:
+                dhcp4: false
+            vlans:
+              {{ trunk_interface }}.10:
+                id: 10
+                link: {{ trunk_interface }}
+                dhcp4: false
+                addresses: [192.168.10.3/24]
+              {{ trunk_interface }}.20:
+                id: 20
+                link: {{ trunk_interface }}
+                dhcp4: false
+                addresses: [192.168.20.3/24]
+              {{ trunk_interface }}.30:
+                id: 30
+                link: {{ trunk_interface }}
+                dhcp4: false
+                addresses: [192.168.30.3/24]
       notify: Apply netplan
 
     - name: Forzar aplicacion de netplan antes de continuar
       ansible.builtin.meta: flush_handlers
 
-    - name: Activar IPv4 forwarding en sysctl
+    - name: Activar IPv4 forwarding
       ansible.builtin.lineinfile:
         path: /etc/sysctl.conf
         regexp: '^#?\s*net\.ipv4\.ip_forward\s*='
@@ -106,55 +123,80 @@
         state: present
         reload: true
 
-    - name: Agregar regla NAT MASQUERADE WAN1
+    # --- NAT hacia WAN ---
+    - name: NAT MASQUERADE WAN1
       ansible.builtin.shell: |
         iptables -t nat -C POSTROUTING -o {{ wan_interface }} -j MASQUERADE || \
         iptables -t nat -A POSTROUTING -o {{ wan_interface }} -j MASQUERADE
       args:
         executable: /bin/bash
 
-    - name: Agregar regla NAT MASQUERADE WAN2
+    - name: NAT MASQUERADE WAN2
       ansible.builtin.shell: |
         iptables -t nat -C POSTROUTING -o {{ wan2_interface }} -j MASQUERADE || \
         iptables -t nat -A POSTROUTING -o {{ wan2_interface }} -j MASQUERADE
       args:
         executable: /bin/bash
 
-    - name: Permitir forwarding de LAN hacia WAN1
+    # --- FORWARD VLANs hacia WAN ---
+    - name: Permitir forwarding VLAN hacia WAN
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT || \
-        iptables -A FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT
+        iptables -C FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan_interface }} -j ACCEPT || \
+        iptables -A FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan_interface }} -j ACCEPT
+        iptables -C FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan2_interface }} -j ACCEPT || \
+        iptables -A FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan2_interface }} -j ACCEPT
+      loop: "{{ vlans }}"
       args:
         executable: /bin/bash
 
-    - name: Permitir forwarding de LAN hacia WAN2
+    - name: Permitir trafico de retorno WAN hacia VLANs
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ lan_interface }} -o {{ wan2_interface }} -j ACCEPT || \
-        iptables -A FORWARD -i {{ lan_interface }} -o {{ wan2_interface }} -j ACCEPT
+        iptables -C FORWARD -i {{ wan_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
+        iptables -A FORWARD -i {{ wan_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+        iptables -C FORWARD -i {{ wan2_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
+        iptables -A FORWARD -i {{ wan2_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+      loop: "{{ vlans }}"
       args:
         executable: /bin/bash
 
-    - name: Permitir trafico de retorno WAN1 hacia LAN
+    # --- Politicas inter-VLAN ---
+    - name: Permitir trabajadores (VLAN20) acceder a servidores (VLAN10)
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
-        iptables -A FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+        iptables -C FORWARD -i {{ trunk_interface }}.20 -o {{ trunk_interface }}.10 -j ACCEPT || \
+        iptables -A FORWARD -i {{ trunk_interface }}.20 -o {{ trunk_interface }}.10 -j ACCEPT
       args:
         executable: /bin/bash
 
-    - name: Permitir trafico de retorno WAN2 hacia LAN
+    - name: Permitir respuestas de servidores (VLAN10) hacia trabajadores (VLAN20)
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ wan2_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
-        iptables -A FORWARD -i {{ wan2_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+        iptables -C FORWARD -i {{ trunk_interface }}.10 -o {{ trunk_interface }}.20 -m state --state RELATED,ESTABLISHED -j ACCEPT || \
+        iptables -A FORWARD -i {{ trunk_interface }}.10 -o {{ trunk_interface }}.20 -m state --state RELATED,ESTABLISHED -j ACCEPT
       args:
         executable: /bin/bash
 
-    - name: Permitir trafico VRRP en LAN
+    - name: Bloquear invitados (VLAN30) hacia servidores (VLAN10)
       ansible.builtin.shell: |
-        iptables -C INPUT -i {{ lan_interface }} -p vrrp -j ACCEPT || \
-        iptables -A INPUT -i {{ lan_interface }} -p vrrp -j ACCEPT
+        iptables -C FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.10 -j DROP || \
+        iptables -A FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.10 -j DROP
       args:
         executable: /bin/bash
 
+    - name: Bloquear invitados (VLAN30) hacia trabajadores (VLAN20)
+      ansible.builtin.shell: |
+        iptables -C FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.20 -j DROP || \
+        iptables -A FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.20 -j DROP
+      args:
+        executable: /bin/bash
+
+    - name: Permitir trafico VRRP en subinterfaces VLAN
+      ansible.builtin.shell: |
+        iptables -C INPUT -i {{ trunk_interface }}.{{ item.id }} -p vrrp -j ACCEPT || \
+        iptables -A INPUT -i {{ trunk_interface }}.{{ item.id }} -p vrrp -j ACCEPT
+      loop: "{{ vlans }}"
+      args:
+        executable: /bin/bash
+
+    # --- ECMP ---
     - name: Configurar ECMP multipath routing
       ansible.builtin.shell: |
         ip route replace default scope global \
@@ -190,14 +232,19 @@
         enabled: true
         state: started
 
-    - name: Configurar keepalived VRRP
+    # --- VRRP por VLAN ---
+    - name: Configurar keepalived con una instancia por VLAN
       ansible.builtin.copy:
         dest: /etc/keepalived/keepalived.conf
+        owner: root
+        group: root
+        mode: "0644"
         content: |
-          vrrp_instance LAN_VIP {
+          {% for vlan in vlans %}
+          vrrp_instance VLAN{{ vlan.id }}_VIP {
               state {{ vrrp_state }}
-              interface {{ lan_interface }}
-              virtual_router_id {{ vrrp_router_id }}
+              interface {{ trunk_interface }}.{{ vlan.id }}
+              virtual_router_id {{ vlan.vrrp_id }}
               priority {{ vrrp_priority }}
               advert_int 1
 
@@ -207,12 +254,11 @@
               }
 
               virtual_ipaddress {
-                  {{ virtual_ip }} dev {{ lan_interface }}
+                  {{ vlan.vip }} dev {{ trunk_interface }}.{{ vlan.id }}
               }
           }
-        owner: root
-        group: root
-        mode: "0644"
+
+          {% endfor %}
       notify: Restart keepalived
 
     - name: Iniciar y habilitar keepalived
