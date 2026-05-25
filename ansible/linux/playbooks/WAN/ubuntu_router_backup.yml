@@ -5,7 +5,7 @@
 
   vars:
     wan_interface: ens34
-    wan1_address: "172.17.25.62/24"
+    wan1_address: "172.17.25.61/24"
     wan1_gateway: "172.17.25.121"
     wan2_interface: ens35
     wan2_address: "168.17.25.3/29"
