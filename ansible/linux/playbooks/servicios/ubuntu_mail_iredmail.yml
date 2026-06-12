@@ -18,6 +18,11 @@
       ansible.builtin.apt:
         update_cache: true
         upgrade: dist
+      become: yes
+      register: apt_result
+      until: apt_result is succeeded
+      retries: 5
+      delay: 10
 
     - name: Instalar dependencias basicas
       ansible.builtin.apt:
