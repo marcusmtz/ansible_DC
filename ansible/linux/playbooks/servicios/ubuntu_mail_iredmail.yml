@@ -84,6 +84,11 @@
         url: "https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz"
         dest: /opt/iredmail.tar.gz
         mode: '0644'
+        timeout: 60
+      register: download_result
+      until: download_result is succeeded
+      retries: 5
+      delay: 10
 
     - name: Extraer iRedMail
       ansible.builtin.unarchive:
