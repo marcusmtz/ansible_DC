@@ -5,7 +5,7 @@
 
   vars:
     hostname_mail: mail
-    domain_mail: marqcord.local
+    domain_mail: marqcord.internal
     fqdn: "{{ hostname_mail }}.{{ domain_mail }}"
     mail_ip: "192.168.10.9"
     dns_master_ip: "192.168.10.5"
@@ -55,13 +55,13 @@
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: "^{{ dns_master_ip }}\\s"
-        line: "{{ dns_master_ip }} dc1.marqcord.local dc1"
+        line: "{{ dns_master_ip }} dc1.marqcord.internal dc1"
 
     - name: Configurar /etc/hosts - entrada del DNS secundario
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: "^{{ dns_secondary_ip }}\\s"
-        line: "{{ dns_secondary_ip }} dns2.marqcord.local dns2"
+        line: "{{ dns_secondary_ip }} dns2.marqcord.internal dns2"
 
     - name: Crear directorio drop-in para systemd-resolved
       ansible.builtin.file:
