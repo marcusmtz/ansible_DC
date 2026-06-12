@@ -79,16 +79,16 @@
           Domains={{ domain_mail }}
       notify: Reiniciar systemd-resolved
 
-    - name: Descargar iRedMail
-      ansible.builtin.get_url:
-        url: "https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz"
-        dest: /opt/iredmail.tar.gz
-        mode: '0644'
-        timeout: 60
+    - name: Descargar iRedMail (Forzando IPv4 vía curl)
+      ansible.builtin.shell:
+        cmd: "curl -4 -L -s -S https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz -o /opt/iredmail.tar.gz"
+      become: yes
       register: download_result
-      until: download_result is succeeded
+      until: download_result.rc == 0
       retries: 5
       delay: 10
+      args:
+        creates: /opt/iredmail.tar.gz
 
     - name: Extraer iRedMail
       ansible.builtin.unarchive:
