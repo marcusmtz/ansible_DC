@@ -84,6 +84,10 @@
         name: systemd-resolved
         state: restarted
 
+    - name: Deshabilitar UFW para permitir descargas
+      ansible.builtin.ufw:
+        state: disabled
+
     - name: Descargar iRedMail (Forzando IPv4 vía curl)
       ansible.builtin.shell:
         cmd: "curl -4 -L -s -S https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz -o /opt/iredmail.tar.gz"
