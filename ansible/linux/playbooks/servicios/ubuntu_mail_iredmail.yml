@@ -75,9 +75,14 @@
         mode: '0644'
         content: |
           [Resolve]
-          DNS={{ dns_master_ip }} {{ dns_secondary_ip }}
+          DNS={{ dns_master_ip }} {{ dns_secondary_ip }} 8.8.8.8
           Domains={{ domain_mail }}
-      notify: Reiniciar systemd-resolved
+      notify: Reiniciar systemd-resolved  # <--- Alineado aquí, justo debajo de ansible.builtin.copy
+
+    - name: Forzar reinicio de DNS inmediato
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
 
     - name: Descargar iRedMail (Forzando IPv4 vía curl)
       ansible.builtin.shell:
