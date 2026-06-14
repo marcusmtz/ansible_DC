@@ -91,21 +91,13 @@
               {{ trunk_interface }}:
                 dhcp4: false
             vlans:
-              {{ trunk_interface }}.10:
-                id: 10
+{% for vlan in vlans %}
+              {{ trunk_interface }}.{{ vlan.id }}:
+                id: {{ vlan.id }}
                 link: {{ trunk_interface }}
                 dhcp4: false
-                addresses: [192.168.10.3/24]
-              {{ trunk_interface }}.20:
-                id: 20
-                link: {{ trunk_interface }}
-                dhcp4: false
-                addresses: [192.168.20.3/24]
-              {{ trunk_interface }}.30:
-                id: 30
-                link: {{ trunk_interface }}
-                dhcp4: false
-                addresses: [192.168.30.3/24]
+                addresses: [{{ vlan.address }}]
+{% endfor %}
       notify: Apply netplan
 
     - name: Forzar aplicacion de netplan antes de continuar
@@ -129,84 +121,205 @@
     # --- NAT hacia WAN ---
     - name: NAT MASQUERADE WAN1
       ansible.builtin.shell: |
-        iptables -t nat -C POSTROUTING -o {{ wan_interface }} -j MASQUERADE || \
-        iptables -t nat -A POSTROUTING -o {{ wan_interface }} -j MASQUERADE
+        if iptables -t nat -C POSTROUTING -o {{ wan_interface }} -j MASQUERADE 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -t nat -A POSTROUTING -o {{ wan_interface }} -j MASQUERADE
+          echo "ADDED"
+        fi
       args:
         executable: /bin/bash
+      register: nat_wan1
+      changed_when: "'ADDED' in nat_wan1.stdout"
 
     - name: NAT MASQUERADE WAN2
       ansible.builtin.shell: |
-        iptables -t nat -C POSTROUTING -o {{ wan2_interface }} -j MASQUERADE || \
-        iptables -t nat -A POSTROUTING -o {{ wan2_interface }} -j MASQUERADE
+        if iptables -t nat -C POSTROUTING -o {{ wan2_interface }} -j MASQUERADE 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -t nat -A POSTROUTING -o {{ wan2_interface }} -j MASQUERADE
+          echo "ADDED"
+        fi
       args:
         executable: /bin/bash
+      register: nat_wan2
+      changed_when: "'ADDED' in nat_wan2.stdout"
 
     # --- FORWARD VLANs hacia WAN ---
     - name: Permitir forwarding VLAN hacia WAN
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan_interface }} -j ACCEPT || \
-        iptables -A FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan_interface }} -j ACCEPT
-        iptables -C FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan2_interface }} -j ACCEPT || \
-        iptables -A FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan2_interface }} -j ACCEPT
+        changed=0
+        if ! iptables -C FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan_interface }} -j ACCEPT 2>/dev/null; then
+          iptables -A FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan_interface }} -j ACCEPT
+          changed=1
+        fi
+        if ! iptables -C FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan2_interface }} -j ACCEPT 2>/dev/null; then
+          iptables -A FORWARD -i {{ trunk_interface }}.{{ item.id }} -o {{ wan2_interface }} -j ACCEPT
+          changed=1
+        fi
+        [ $changed -eq 1 ] && echo "ADDED" || echo "EXISTS"
       loop: "{{ vlans }}"
       args:
         executable: /bin/bash
+      register: fwd_vlan_wan
+      changed_when: "'ADDED' in fwd_vlan_wan.stdout"
 
     - name: Permitir trafico de retorno WAN hacia VLANs
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ wan_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
-        iptables -A FORWARD -i {{ wan_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT
-        iptables -C FORWARD -i {{ wan2_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
-        iptables -A FORWARD -i {{ wan2_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+        changed=0
+        if ! iptables -C FORWARD -i {{ wan_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+          iptables -A FORWARD -i {{ wan_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+          changed=1
+        fi
+        if ! iptables -C FORWARD -i {{ wan2_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+          iptables -A FORWARD -i {{ wan2_interface }} -o {{ trunk_interface }}.{{ item.id }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+          changed=1
+        fi
+        [ $changed -eq 1 ] && echo "ADDED" || echo "EXISTS"
       loop: "{{ vlans }}"
       args:
         executable: /bin/bash
+      register: ret_wan_vlan
+      changed_when: "'ADDED' in ret_wan_vlan.stdout"
 
     # --- Politicas inter-VLAN ---
     - name: Permitir trabajadores (VLAN20) acceder a servidores (VLAN10)
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ trunk_interface }}.20 -o {{ trunk_interface }}.10 -j ACCEPT || \
-        iptables -A FORWARD -i {{ trunk_interface }}.20 -o {{ trunk_interface }}.10 -j ACCEPT
+        if iptables -C FORWARD -i {{ trunk_interface }}.20 -o {{ trunk_interface }}.10 -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A FORWARD -i {{ trunk_interface }}.20 -o {{ trunk_interface }}.10 -j ACCEPT
+          echo "ADDED"
+        fi
       args:
         executable: /bin/bash
+      register: fwd_v20_v10
+      changed_when: "'ADDED' in fwd_v20_v10.stdout"
 
     - name: Permitir respuestas de servidores (VLAN10) hacia trabajadores (VLAN20)
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ trunk_interface }}.10 -o {{ trunk_interface }}.20 -m state --state RELATED,ESTABLISHED -j ACCEPT || \
-        iptables -A FORWARD -i {{ trunk_interface }}.10 -o {{ trunk_interface }}.20 -m state --state RELATED,ESTABLISHED -j ACCEPT
+        if iptables -C FORWARD -i {{ trunk_interface }}.10 -o {{ trunk_interface }}.20 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A FORWARD -i {{ trunk_interface }}.10 -o {{ trunk_interface }}.20 -m state --state RELATED,ESTABLISHED -j ACCEPT
+          echo "ADDED"
+        fi
       args:
         executable: /bin/bash
+      register: fwd_v10_v20
+      changed_when: "'ADDED' in fwd_v10_v20.stdout"
 
     - name: Bloquear invitados (VLAN30) hacia servidores (VLAN10)
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.10 -j DROP || \
-        iptables -A FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.10 -j DROP
+        if iptables -C FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.10 -j DROP 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.10 -j DROP
+          echo "ADDED"
+        fi
       args:
         executable: /bin/bash
+      register: drop_v30_v10
+      changed_when: "'ADDED' in drop_v30_v10.stdout"
 
     - name: Bloquear invitados (VLAN30) hacia trabajadores (VLAN20)
       ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.20 -j DROP || \
-        iptables -A FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.20 -j DROP
+        if iptables -C FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.20 -j DROP 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A FORWARD -i {{ trunk_interface }}.30 -o {{ trunk_interface }}.20 -j DROP
+          echo "ADDED"
+        fi
       args:
         executable: /bin/bash
+      register: drop_v30_v20
+      changed_when: "'ADDED' in drop_v30_v20.stdout"
 
     - name: Permitir trafico VRRP en subinterfaces VLAN
       ansible.builtin.shell: |
-        iptables -C INPUT -i {{ trunk_interface }}.{{ item.id }} -p vrrp -j ACCEPT || \
-        iptables -A INPUT -i {{ trunk_interface }}.{{ item.id }} -p vrrp -j ACCEPT
+        if iptables -C INPUT -i {{ trunk_interface }}.{{ item.id }} -p vrrp -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i {{ trunk_interface }}.{{ item.id }} -p vrrp -j ACCEPT
+          echo "ADDED"
+        fi
       loop: "{{ vlans }}"
       args:
         executable: /bin/bash
+      register: vrrp_input
+      changed_when: "'ADDED' in vrrp_input.stdout"
 
     # --- DHCP Relay ---
     - name: Permitir DHCP relay en interfaces de clientes (INPUT UDP 67)
       ansible.builtin.shell: |
-        iptables -C INPUT -i {{ trunk_interface }}.{{ item.id }} -p udp --dport 67 -j ACCEPT || \
-        iptables -A INPUT -i {{ trunk_interface }}.{{ item.id }} -p udp --dport 67 -j ACCEPT
+        if iptables -C INPUT -i {{ trunk_interface }}.{{ item.id }} -p udp --dport 67 -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i {{ trunk_interface }}.{{ item.id }} -p udp --dport 67 -j ACCEPT
+          echo "ADDED"
+        fi
       loop: "{{ vlans | selectattr('id', 'ne', 10) | list }}"
       args:
         executable: /bin/bash
+      register: dhcp_input
+      changed_when: "'ADDED' in dhcp_input.stdout"
+
+    # --- Firewall INPUT ---
+    - name: Permitir trafico establecido y relacionado en INPUT
+      ansible.builtin.shell: |
+        if iptables -C INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: input_established
+      changed_when: "'ADDED' in input_established.stdout"
+
+    - name: Permitir trafico loopback en INPUT
+      ansible.builtin.shell: |
+        if iptables -C INPUT -i lo -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i lo -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: input_loopback
+      changed_when: "'ADDED' in input_loopback.stdout"
+
+    - name: Permitir SSH desde VLAN de servidores (VLAN10)
+      ansible.builtin.shell: |
+        if iptables -C INPUT -i {{ trunk_interface }}.10 -p tcp --dport 22 -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i {{ trunk_interface }}.10 -p tcp --dport 22 -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: input_ssh
+      changed_when: "'ADDED' in input_ssh.stdout"
+
+    - name: Establecer politicas por defecto (INPUT DROP, FORWARD DROP)
+      ansible.builtin.shell: |
+        changed=0
+        if [ "$(iptables -L INPUT | head -1 | grep -o 'policy [A-Z]*')" != "policy DROP" ]; then
+          iptables -P INPUT DROP
+          changed=1
+        fi
+        if [ "$(iptables -L FORWARD | head -1 | grep -o 'policy [A-Z]*')" != "policy DROP" ]; then
+          iptables -P FORWARD DROP
+          changed=1
+        fi
+        [ $changed -eq 1 ] && echo "CHANGED" || echo "EXISTS"
+      args:
+        executable: /bin/bash
+      register: default_policies
+      changed_when: "'CHANGED' in default_policies.stdout"
 
     - name: Configurar DHCP relay agent
       ansible.builtin.copy:
@@ -301,6 +414,7 @@
       ansible.builtin.shell: netfilter-persistent save
       args:
         executable: /bin/bash
+      changed_when: false
 
   handlers:
     - name: Apply netplan

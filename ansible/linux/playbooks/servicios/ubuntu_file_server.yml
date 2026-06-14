@@ -16,7 +16,11 @@
         that:
           - smb_user | length > 0
           - smb_password | length >= 8
-        fail_msg: "Define smb_user y smb_password validos (minimo 8 caracteres)."
+          - smb_password | regex_search('[A-Z]')
+          - smb_password | regex_search('[a-z]')
+          - smb_password | regex_search('[0-9]')
+          - smb_password | regex_search('[^A-Za-z0-9]')
+        fail_msg: "smb_password debe tener minimo 8 caracteres, mayusculas, minusculas, numeros y un caracter especial."
 
   tasks:
     - name: Instalar Samba
@@ -106,6 +110,12 @@
         enabled: true
         state: started
 
+    - name: Habilitar y arrancar servicio nmbd
+      ansible.builtin.service:
+        name: nmbd
+        enabled: true
+        state: started
+
     - name: Permitir Samba en UFW si esta activo
       ansible.builtin.command: ufw allow Samba
       register: ufw_samba
@@ -115,5 +125,8 @@
   handlers:
     - name: Restart samba
       ansible.builtin.service:
-        name: smbd
+        name: "{{ item }}"
         state: restarted
+      with_items:
+        - smbd
+        - nmbd

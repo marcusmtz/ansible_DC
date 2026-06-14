@@ -4,8 +4,8 @@
   gather_facts: false
 
   vars:
-    domain_name: marqcord.internal
-    netbios_name: MARQCORD
+    domain_name: norcom.internal
+    netbios_name: NORCOM
     dsrm_password: "Mrk87dwp!"
 
   tasks:
@@ -13,7 +13,11 @@
       ansible.builtin.assert:
         that:
           - dsrm_password | length >= 8
-        fail_msg: "Define dsrm_password con al menos 8 caracteres."
+          - dsrm_password | regex_search('[A-Z]')
+          - dsrm_password | regex_search('[a-z]')
+          - dsrm_password | regex_search('[0-9]')
+          - dsrm_password | regex_search('[^A-Za-z0-9]')
+        fail_msg: "dsrm_password debe tener minimo 8 caracteres, mayusculas, minusculas, numeros y un caracter especial."
 
     - name: Instalar AD DS y DNS
       ansible.windows.win_feature:
@@ -32,7 +36,7 @@
 
     - name: Habilitar reglas de firewall para RDP
       ansible.windows.win_shell: Enable-NetFirewallRule -Name "RemoteDesktop*"
-      changed_when: false
+      changed_when: true
 
     - name: Crear nuevo bosque con DNS integrado
       microsoft.ad.domain:

@@ -30,8 +30,8 @@
               directory "/var/cache/bind";
 
               recursion yes;
-              allow-recursion { any; };
-              allow-query { any; };
+              allow-recursion { 192.168.0.0/16; 127.0.0.1; };
+              allow-query { 192.168.0.0/16; 127.0.0.1; };
 
               listen-on { 127.0.0.1; {{ dns_listen_ip }}; };
               listen-on-v6 { any; };
@@ -49,7 +49,7 @@
         content: |
           {% for zone_name in dns_zones %}
           zone "{{ zone_name }}" {
-              type slave;
+              type secondary;
               file "/var/cache/bind/db.{{ zone_name }}";
               masters { {{ dns_master_ip }}; };
           };

@@ -36,7 +36,7 @@
       delegate_to: localhost
       become: false
 
-    - name: Instalar DHCP (sin pools)
+    - name: Instalar DHCP
       ansible.windows.win_feature:
         name: DHCP
         state: present
@@ -93,32 +93,55 @@
       ansible.windows.win_shell: |
         $scopeId = "{{ item.scope_id }}"
         $dnsServers = @({{ item.dns_servers | map('regex_replace', '^(.*)$', '"\\1"') | join(', ') }})
+        $expectedLease = [TimeSpan]::new({{ item.lease_days }}, {{ item.lease_hours }}, 0, 0)
+        $changed = $false
 
-        Set-DhcpServerv4OptionValue `
-          -ScopeId $scopeId `
-          -Router "{{ item.router }}" `
-          -DnsServer $dnsServers `
-          -Force
+        $currentRouter = (Get-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 3 -ErrorAction SilentlyContinue).Value
+        if (-not $currentRouter -or $currentRouter[0] -ne "{{ item.router }}") {
+          Set-DhcpServerv4OptionValue -ScopeId $scopeId -Router "{{ item.router }}" -Force
+          $changed = $true
+        }
 
-        Set-DhcpServerv4Scope `
-          -ScopeId $scopeId `
-          -LeaseDuration ([TimeSpan]::new({{ item.lease_days }}, {{ item.lease_hours }}, 0, 0))
+        $currentDns = (Get-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 6 -ErrorAction SilentlyContinue).Value
+        if (-not $currentDns -or (Compare-Object $currentDns $dnsServers)) {
+          Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer $dnsServers -Force
+          $changed = $true
+        }
 
-        Write-Output "CONFIGURED"
+        $currentLease = (Get-DhcpServerv4Scope -ScopeId $scopeId).LeaseDuration
+        if ($currentLease -ne $expectedLease) {
+          Set-DhcpServerv4Scope -ScopeId $scopeId -LeaseDuration $expectedLease
+          $changed = $true
+        }
+
+        if ($changed) { Write-Output "CONFIGURED" } else { Write-Output "EXISTS" }
       loop: "{{ dhcp_scopes }}"
-      changed_when: true
+      register: dhcp_opts_result
+      changed_when: "'CONFIGURED' in dhcp_opts_result.stdout"
 
     - name: Permitir transferencia de zona al DNS secundario
       ansible.windows.win_shell: |
-        Set-DnsServerPrimaryZone -Name "marqcord.internal" -SecureSecondaries TransferToSecureServers -SecondaryServers 192.168.10.6
+        $zone = Get-DnsServerPrimaryZone -Name "norcom.internal" -ErrorAction SilentlyContinue
+        if ($zone.SecureSecondaries -eq "TransferToSecureServers" -and $zone.SecondaryServers -contains "192.168.10.6") {
+          Write-Output "EXISTS"
+        } else {
+          Set-DnsServerPrimaryZone -Name "norcom.internal" -SecureSecondaries TransferToSecureServers -SecondaryServers 192.168.10.6
+          Write-Output "CHANGED"
+        }
       register: zone_xfer
-      changed_when: true
+      changed_when: "'CHANGED' in zone_xfer.stdout"
 
     - name: Configurar notify DNS para secundarios
       ansible.windows.win_shell: |
-        Set-DnsServerPrimaryZone -Name "marqcord.internal" -Notify Notify
+        $zone = Get-DnsServerPrimaryZone -Name "norcom.internal" -ErrorAction SilentlyContinue
+        if ($zone.Notify -eq "Notify") {
+          Write-Output "EXISTS"
+        } else {
+          Set-DnsServerPrimaryZone -Name "norcom.internal" -Notify Notify
+          Write-Output "CHANGED"
+        }
       register: zone_notify
-      changed_when: true
+      changed_when: "'CHANGED' in zone_notify.stdout"
 
     - name: Validar identidad actual
       ansible.windows.win_shell: whoami
