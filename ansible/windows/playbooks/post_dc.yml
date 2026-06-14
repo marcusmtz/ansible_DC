@@ -3,6 +3,30 @@
   hosts: windows_domain
   gather_facts: false
 
+  vars:
+    dhcp_scopes:
+      - scope_id: "192.168.20.0"
+        name: "VLAN20-Trabajadores"
+        start_range: "192.168.20.100"
+        end_range: "192.168.20.199"
+        subnet_mask: "255.255.255.0"
+        router: "192.168.20.1"
+        dns_servers: ["192.168.10.5", "192.168.10.6"]
+        lease_days: 1
+        lease_hours: 0
+        description: "Trabajadores - VLAN 20"
+
+      - scope_id: "192.168.30.0"
+        name: "VLAN30-Invitados"
+        start_range: "192.168.30.100"
+        end_range: "192.168.30.199"
+        subnet_mask: "255.255.255.0"
+        router: "192.168.30.1"
+        dns_servers: ["8.8.8.8", "1.1.1.1"]
+        lease_days: 0
+        lease_hours: 4
+        description: "Invitados WiFi - VLAN 30"
+
   tasks:
     - name: Esperar a WinRM
       ansible.builtin.wait_for:
@@ -44,6 +68,45 @@
         }
       register: dhcp_authorize
       changed_when: "'AUTHORIZED' in dhcp_authorize.stdout"
+
+    - name: Crear scope DHCP por VLAN
+      ansible.windows.win_shell: |
+        $scopeId = "{{ item.scope_id }}"
+        $existing = Get-DhcpServerv4Scope -ScopeId $scopeId -ErrorAction SilentlyContinue
+        if (-not $existing) {
+          Add-DhcpServerv4Scope `
+            -Name "{{ item.name }}" `
+            -StartRange "{{ item.start_range }}" `
+            -EndRange "{{ item.end_range }}" `
+            -SubnetMask "{{ item.subnet_mask }}" `
+            -Description "{{ item.description }}" `
+            -State Active
+          Write-Output "CREATED"
+        } else {
+          Write-Output "EXISTS"
+        }
+      loop: "{{ dhcp_scopes }}"
+      register: dhcp_scope_result
+      changed_when: "'CREATED' in dhcp_scope_result.stdout"
+
+    - name: Configurar opciones de scope DHCP (router, DNS y lease)
+      ansible.windows.win_shell: |
+        $scopeId = "{{ item.scope_id }}"
+        $dnsServers = @({{ item.dns_servers | map('regex_replace', '^(.*)$', '"\\1"') | join(', ') }})
+
+        Set-DhcpServerv4OptionValue `
+          -ScopeId $scopeId `
+          -Router "{{ item.router }}" `
+          -DnsServer $dnsServers `
+          -Force
+
+        Set-DhcpServerv4Scope `
+          -ScopeId $scopeId `
+          -LeaseDuration ([TimeSpan]::new({{ item.lease_days }}, {{ item.lease_hours }}, 0, 0))
+
+        Write-Output "CONFIGURED"
+      loop: "{{ dhcp_scopes }}"
+      changed_when: true
 
     - name: Permitir transferencia de zona al DNS secundario
       ansible.windows.win_shell: |

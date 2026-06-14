@@ -32,6 +32,8 @@
         vip: "192.168.30.1/24"
         vrrp_id: 30
 
+    dhcp_server: "192.168.10.5"
+
     vrrp_state: MASTER
     vrrp_priority: 200
     vrrp_auth_pass: VRRP_PASS_2024
@@ -51,6 +53,7 @@
           - netfilter-persistent
           - keepalived
           - vlan
+          - isc-dhcp-relay
         state: present
         update_cache: true
 
@@ -196,6 +199,33 @@
       args:
         executable: /bin/bash
 
+    # --- DHCP Relay ---
+    - name: Permitir DHCP relay en interfaces de clientes (INPUT UDP 67)
+      ansible.builtin.shell: |
+        iptables -C INPUT -i {{ trunk_interface }}.{{ item.id }} -p udp --dport 67 -j ACCEPT || \
+        iptables -A INPUT -i {{ trunk_interface }}.{{ item.id }} -p udp --dport 67 -j ACCEPT
+      loop: "{{ vlans | selectattr('id', 'ne', 10) | list }}"
+      args:
+        executable: /bin/bash
+
+    - name: Configurar DHCP relay agent
+      ansible.builtin.copy:
+        dest: /etc/default/isc-dhcp-relay
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          SERVERS="{{ dhcp_server }}"
+          INTERFACES="{% for vlan in vlans if vlan.id != 10 %}{{ trunk_interface }}.{{ vlan.id }}{% if not loop.last %} {% endif %}{% endfor %}"
+          OPTIONS=""
+      notify: Restart isc-dhcp-relay
+
+    - name: Habilitar e iniciar DHCP relay
+      ansible.builtin.systemd:
+        name: isc-dhcp-relay
+        enabled: true
+        state: started
+
     # --- ECMP ---
     - name: Configurar ECMP multipath routing
       ansible.builtin.shell: |
@@ -284,4 +314,9 @@
     - name: Restart keepalived
       ansible.builtin.systemd:
         name: keepalived
+        state: restarted
+
+    - name: Restart isc-dhcp-relay
+      ansible.builtin.systemd:
+        name: isc-dhcp-relay
         state: restarted
