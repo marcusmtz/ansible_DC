@@ -1,116 +1,119 @@
 ---
-- name: Configurar Ubuntu como file server (Samba)
+- name: Configurar Ubuntu como file server (Samba + Active Directory)
   hosts: ubuntu_file_server
   become: true
 
   vars:
     smb_share_name: Compartido
     smb_share_path: /srv/samba/compartido
-    smb_group: sambausers
-    smb_user: fileserver
-    smb_password: mrk87dwp
-
-  pre_tasks:
-    - name: Validar credenciales de Samba
-      ansible.builtin.assert:
-        that:
-          - smb_user | length > 0
-          - smb_password | length >= 8
-          - smb_password is search('[A-Z]')
-          - smb_password is search('[a-z]')
-          - smb_password is search('[0-9]')
-          - smb_password is search('[^A-Za-z0-9]')
-        fail_msg: "smb_password debe tener minimo 8 caracteres, mayusculas, minusculas, numeros y un caracter especial."
+    smb_share_group: Trabajadores
+    domain: norcom.internal
+    domain_upper: NORCOM
+    domain_admin: Administrador
+    domain_admin_password: "Mrk87dwp_"
 
   tasks:
-    - name: Instalar Samba
+    - name: Instalar paquetes necesarios
       ansible.builtin.apt:
         name:
           - samba
+          - winbind
+          - libpam-winbind
+          - libnss-winbind
+          - krb5-user
+          - realmd
+          - sssd
+          - sssd-tools
+          - adcli
         state: present
         update_cache: true
 
-    - name: Crear grupo para acceso al recurso compartido
-      ansible.builtin.group:
-        name: "{{ smb_group }}"
-        state: present
-
-    - name: Crear usuario local para Samba
-      ansible.builtin.user:
-        name: "{{ smb_user }}"
-        shell: /usr/sbin/nologin
-        create_home: false
-        groups: "{{ smb_group }}"
-        append: true
-        state: present
-
-    - name: Verificar si el usuario ya existe en Samba
-      ansible.builtin.command: pdbedit -L -u "{{ smb_user }}"
-      register: smb_user_exists
-      failed_when: false
-      changed_when: false
-
-    - name: Crear usuario en base de datos Samba
+    - name: Unir al dominio Active Directory
       ansible.builtin.shell: |
-        (echo "{{ smb_password }}"; echo "{{ smb_password }}") | smbpasswd -s -a "{{ smb_user }}"
+        if realm list | grep -q "{{ domain }}"; then
+          echo "ALREADY_JOINED"
+        else
+          echo "{{ domain_admin_password }}" | realm join --user={{ domain_admin }} {{ domain }}
+          echo "JOINED"
+        fi
       args:
         executable: /bin/bash
-      when: smb_user_exists.rc != 0
+      register: realm_join
+      changed_when: "'JOINED' in realm_join.stdout"
+
+    - name: Agregar winbind a nsswitch passwd
+      ansible.builtin.lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^passwd:'
+        line: 'passwd:         compat winbind'
+
+    - name: Agregar winbind a nsswitch group
+      ansible.builtin.lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^group:'
+        line: 'group:          compat winbind'
+
+    - name: Configurar Samba para Active Directory
+      ansible.builtin.copy:
+        dest: /etc/samba/smb.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [global]
+              workgroup = {{ domain_upper }}
+              realm = {{ domain | upper }}
+              security = ADS
+
+              idmap config * : backend = tdb
+              idmap config * : range = 1000-9999
+              idmap config {{ domain_upper }} : backend = rid
+              idmap config {{ domain_upper }} : range = 10000-99999
+
+              winbind use default domain = yes
+              winbind enum users = yes
+              winbind enum groups = yes
+              winbind refresh tickets = yes
+
+              server min protocol = SMB2
+              server max protocol = SMB3
+
+          [{{ smb_share_name }}]
+              path = {{ smb_share_path }}
+              browseable = yes
+              read only = no
+              guest ok = no
+              valid users = @"{{ domain_upper }}\{{ smb_share_group }}"
+              create mask = 0660
+              directory mask = 0770
+      notify: Restart samba
 
     - name: Crear carpeta del recurso compartido
       ansible.builtin.file:
         path: "{{ smb_share_path }}"
         state: directory
         owner: root
-        group: "{{ smb_group }}"
-        mode: "2770"
-
-    - name: Configurar protocolo minimo SMB en global
-      ansible.builtin.ini_file:
-        path: /etc/samba/smb.conf
-        section: global
-        option: server min protocol
-        value: SMB2
-        no_extra_spaces: true
-      notify: Restart samba
-
-    - name: Configurar protocolo maximo SMB en global
-      ansible.builtin.ini_file:
-        path: /etc/samba/smb.conf
-        section: global
-        option: server max protocol
-        value: SMB3
-        no_extra_spaces: true
-      notify: Restart samba
-
-    - name: Configurar recurso compartido en smb.conf
-      ansible.builtin.blockinfile:
-        path: /etc/samba/smb.conf
-        marker: "; {mark} ANSIBLE FILE SERVER"
-        block: |
-          [{{ smb_share_name }}]
-          path = {{ smb_share_path }}
-          browseable = yes
-          read only = no
-          guest ok = no
-          valid users = @{{ smb_group }}
-          force group = {{ smb_group }}
-          create mask = 0660
-          directory mask = 2770
-      notify: Restart samba
+        group: root
+        mode: "0777"
 
     - name: Validar configuracion de Samba
       ansible.builtin.command: testparm -s
       register: samba_config_test
       changed_when: false
 
-    - name: Habilitar y arrancar servicio smbd
+    - name: Habilitar y arrancar winbind
+      ansible.builtin.service:
+        name: winbind
+        enabled: true
+        state: started
+
+    - name: Habilitar y arrancar smbd
       ansible.builtin.service:
         name: smbd
         enabled: true
         state: started
 
-    - name: Habilitar y arrancar servicio nmbd
+    - name: Habilitar y arrancar nmbd
       ansible.builtin.service:
         name: nmbd
         enabled: true
@@ -129,4 +132,5 @@
         state: restarted
       with_items:
         - smbd
+        - winbind
         - nmbd

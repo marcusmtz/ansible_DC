@@ -1,0 +1,37 @@
+---
+- name: Crear usuarios y grupos en Active Directory
+  hosts: windows_domain
+  gather_facts: false
+
+  vars:
+    ad_workers:
+      - name: trabajador1
+        firstname: Trabajador
+        surname: Uno
+        password: "Trabajo1!"
+      - name: trabajador2
+        firstname: Trabajador
+        surname: Dos
+        password: "Trabajo2!"
+
+  tasks:
+    - name: Crear grupo de seguridad Trabajadores
+      microsoft.ad.group:
+        name: Trabajadores
+        scope: global
+        category: security
+        state: present
+
+    - name: Crear usuarios trabajadores en AD
+      microsoft.ad.user:
+        name: "{{ item.name }}"
+        firstname: "{{ item.firstname }}"
+        surname: "{{ item.surname }}"
+        password: "{{ item.password }}"
+        update_password: on_create
+        enabled: true
+        groups:
+          add:
+            - Trabajadores
+        state: present
+      loop: "{{ ad_workers }}"

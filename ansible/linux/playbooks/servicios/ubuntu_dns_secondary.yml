@@ -7,7 +7,7 @@
     dns_listen_ip: "192.168.10.6"
     dns_master_ip: "192.168.10.5"
     dns_zones:
-      - "marqcord.internal"
+      - "norcom.internal"
 
   tasks:
     - name: Instalar paquetes DNS
@@ -28,6 +28,12 @@
         content: |
           options {
               directory "/var/cache/bind";
+
+              forwarders {
+                  8.8.8.8;
+                  1.1.1.1;
+              };
+              forward first;
 
               recursion yes;
               allow-recursion { 192.168.0.0/16; 127.0.0.1; };
