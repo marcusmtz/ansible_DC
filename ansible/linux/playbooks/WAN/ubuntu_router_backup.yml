@@ -299,11 +299,11 @@
     - name: Establecer politicas por defecto (INPUT DROP, FORWARD DROP)
       ansible.builtin.shell: |
         changed=0
-        if [ "$(iptables -L INPUT | head -1 | grep -o 'policy [A-Z]*')" != "policy DROP" ]; then
+        if [ "$(iptables -S INPUT | head -1)" != "-P INPUT DROP" ]; then
           iptables -P INPUT DROP
           changed=1
         fi
-        if [ "$(iptables -L FORWARD | head -1 | grep -o 'policy [A-Z]*')" != "policy DROP" ]; then
+        if [ "$(iptables -S FORWARD | head -1)" != "-P FORWARD DROP" ]; then
           iptables -P FORWARD DROP
           changed=1
         fi
