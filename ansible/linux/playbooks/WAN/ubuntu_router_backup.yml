@@ -91,13 +91,13 @@
               {{ trunk_interface }}:
                 dhcp4: false
             vlans:
-{% for vlan in vlans %}
+          {%- for vlan in vlans %}
               {{ trunk_interface }}.{{ vlan.id }}:
                 id: {{ vlan.id }}
                 link: {{ trunk_interface }}
                 dhcp4: false
                 addresses: [{{ vlan.address }}]
-{% endfor %}
+          {%- endfor %}
       notify: Apply netplan
 
     - name: Forzar aplicacion de netplan antes de continuar
