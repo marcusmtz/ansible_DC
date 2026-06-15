@@ -5,14 +5,14 @@
 
   vars:
     wan_interface: ens34
-    wan1_address: "172.17.25.61/24"
+    wan1_address: "172.17.25.42/24"
     wan1_gateway: "172.17.25.121"
     wan2_interface: ens35
     wan2_address: "168.17.25.3/29"
     wan2_gateway: "168.17.25.1"
 
     # Trunk LAN - sin IP propia
-    trunk_interface: ens38
+    trunk_interface: ens36
 
     # VLANs
     vlans:
@@ -37,7 +37,7 @@
     vrrp_state: BACKUP
     vrrp_priority: 100
     vrrp_auth_pass: VRRP_PASS_2024
-    netplan_file: /etc/netplan/50-cloud-init.yaml
+    netplan_file: /etc/netplan/00-installer-config.yaml
     nameservers:
       - "8.8.8.8"
       - "1.1.1.1"
@@ -104,15 +104,7 @@
       ansible.builtin.meta: flush_handlers
 
     - name: Activar IPv4 forwarding
-      ansible.builtin.lineinfile:
-        path: /etc/sysctl.conf
-        regexp: '^#?\s*net\.ipv4\.ip_forward\s*='
-        line: 'net.ipv4.ip_forward=1'
-        state: present
-      notify: Apply sysctl
-
-    - name: Aplicar IPv4 forwarding inmediatamente
-      ansible.builtin.sysctl:
+      ansible.posix.sysctl:
         name: net.ipv4.ip_forward
         value: "1"
         state: present
@@ -422,8 +414,6 @@
       args:
         executable: /bin/bash
 
-    - name: Apply sysctl
-      ansible.builtin.command: sysctl -p
 
     - name: Restart keepalived
       ansible.builtin.systemd:
