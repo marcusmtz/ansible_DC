@@ -13,10 +13,10 @@
       ansible.builtin.assert:
         that:
           - dsrm_password | length >= 8
-          - dsrm_password | regex_search('[A-Z]')
-          - dsrm_password | regex_search('[a-z]')
-          - dsrm_password | regex_search('[0-9]')
-          - dsrm_password | regex_search('[^A-Za-z0-9]')
+          - dsrm_password is search('[A-Z]')
+          - dsrm_password is search('[a-z]')
+          - dsrm_password is search('[0-9]')
+          - dsrm_password is search('[^A-Za-z0-9]')
         fail_msg: "dsrm_password debe tener minimo 8 caracteres, mayusculas, minusculas, numeros y un caracter especial."
 
     - name: Instalar AD DS y DNS
