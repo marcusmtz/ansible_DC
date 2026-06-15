@@ -71,16 +71,8 @@
         content: "{{ netplan_updated | to_nice_yaml(indent=2, sort_keys=False) }}"
       notify: Apply netplan
 
-    - name: Activar IPv4 forwarding en sysctl
-      ansible.builtin.lineinfile:
-        path: /etc/sysctl.conf
-        regexp: '^#?\s*net\.ipv4\.ip_forward\s*='
-        line: 'net.ipv4.ip_forward=1'
-        state: present
-      notify: Apply sysctl
-
-    - name: Aplicar IPv4 forwarding inmediatamente
-      ansible.builtin.sysctl:
+    - name: Activar IPv4 forwarding
+      ansible.posix.sysctl:
         name: net.ipv4.ip_forward
         value: "1"
         state: present
@@ -118,5 +110,3 @@
       args:
         executable: /bin/bash
 
-    - name: Apply sysctl
-      ansible.builtin.command: sysctl -p
