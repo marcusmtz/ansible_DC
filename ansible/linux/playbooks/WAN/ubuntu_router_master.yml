@@ -296,6 +296,19 @@
       register: input_ssh
       changed_when: "'ADDED' in input_ssh.stdout"
 
+    - name: Permitir ICMP ping desde redes internas en INPUT
+      ansible.builtin.shell: |
+        if iptables -C INPUT -s 192.168.0.0/16 -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -s 192.168.0.0/16 -p icmp --icmp-type echo-request -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: input_icmp
+      changed_when: "'ADDED' in input_icmp.stdout"
+
     - name: Establecer politicas por defecto (INPUT DROP, FORWARD DROP)
       ansible.builtin.shell: |
         changed=0
