@@ -2,6 +2,7 @@
 - name: Configurar pfSense Router MASTER usando PHPShell
   hosts: pfsense_router_master
   gather_facts: false
+  connection: ssh
 
   vars:
     # Credenciales para API de pfSense
