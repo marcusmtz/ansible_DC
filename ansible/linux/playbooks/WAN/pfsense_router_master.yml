@@ -184,6 +184,16 @@
     #       - gateway: "{{ wan2_gateway_name }}"
     #         tier: 1
     #     state: present
+  #Accede a https://172.17.25.64
+    #Ve a System → Routing → Gateway Groups
+    #Click en Add
+    #Configura:
+    #Group Name: DUAL_WAN_FAILOVER
+    #Gateway Priority:
+    #WAN1_GW: Tier 1
+    #WAN2_GW: Tier 1
+    #Trigger Level: Member Down
+    #Save
 
     # ========================================================================
     # CREAR VLANs
