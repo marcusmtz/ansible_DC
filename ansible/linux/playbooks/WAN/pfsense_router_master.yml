@@ -83,7 +83,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
 
@@ -112,7 +112,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
 
@@ -148,7 +148,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
@@ -202,7 +202,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
@@ -260,7 +260,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/gwlb.inc");
@@ -299,7 +299,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
@@ -351,7 +351,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
@@ -403,7 +403,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
 
@@ -420,7 +420,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
 
@@ -475,7 +475,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/filter.inc");
@@ -594,7 +594,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/services.inc");
@@ -620,7 +620,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
@@ -670,7 +670,7 @@
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
         pfsense_password: "{{ pfsense_password }}"
-        command: |
+        cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/filter.inc");
