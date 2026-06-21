@@ -2,16 +2,18 @@
 - name: Configurar pfSense Router BACKUP con CARP usando pfsensible.core + phpshell
   hosts: pfsense_router_backup
   gather_facts: false
-  connection: local
   
   vars:
-    ansible_connection: local
+    # Configuración API pfSense
+    ansible_httpapi_host: "172.17.25.65"
+    ansible_httpapi_port: 443
+    ansible_httpapi_use_ssl: true
+    ansible_httpapi_validate_certs: false
+    ansible_network_os: pfsensible.core.pfsense
+    ansible_connection: httpapi
+    ansible_user: "admin"
+    ansible_password: "pfsense"
     ansible_python_interpreter: "{{ ansible_playbook_python }}"
-    
-    # Credenciales para API de pfSense
-    pfsense_host: "172.17.25.65"
-    pfsense_username: "admin"
-    pfsense_password: "pfsense"
     
     wan1_interface: "vmx0"
     wan1_address: "172.17.25.65"
@@ -206,7 +208,18 @@
     - name: Configurar CARP VIPs (Backup mode)
       pfsensible.core.pfsense_phpshell:
         command: |
-          init_config_arr(array('virtualip', 'vip'));
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          require_once("/etc/inc/interfaces.inc");
+          
+          global $config;
+          if (!is_array($config['virtualip'])) {
+              $config['virtualip'] = array();
+          }
+          if (!is_array($config['virtualip']['vip'])) {
+              $config['virtualip']['vip'] = array();
+          }
+          
           $a_vip = &$config['virtualip']['vip'];
           
           $vip_data = array(
@@ -245,7 +258,14 @@
     - name: Configurar modo Hybrid Outbound NAT
       pfsensible.core.pfsense_phpshell:
         command: |
-          if (!isset($config['nat']['outbound'])) {
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          
+          global $config;
+          if (!is_array($config['nat'])) {
+              $config['nat'] = array();
+          }
+          if (!is_array($config['nat']['outbound'])) {
               $config['nat']['outbound'] = array();
           }
           $config['nat']['outbound']['mode'] = 'hybrid';
@@ -351,7 +371,12 @@
     - name: Configurar DHCP Relay
       pfsensible.core.pfsense_phpshell:
         command: |
-          if (!isset($config['dhcrelay'])) {
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          require_once("/etc/inc/services.inc");
+          
+          global $config;
+          if (!is_array($config['dhcrelay'])) {
               $config['dhcrelay'] = array();
           }
           $config['dhcrelay']['enable'] = 'true';
@@ -367,7 +392,12 @@
     - name: Configurar HA Sync (pfsync solamente)
       pfsensible.core.pfsense_phpshell:
         command: |
-          if (!isset($config['hasync'])) {
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          require_once("/etc/inc/interfaces.inc");
+          
+          global $config;
+          if (!is_array($config['hasync'])) {
               $config['hasync'] = array();
           }
           
