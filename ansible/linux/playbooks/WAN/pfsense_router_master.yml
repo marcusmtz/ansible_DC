@@ -226,22 +226,32 @@
     # ========================================================================
     # CONFIGURAR CARP (Virtual IPs)
     # ========================================================================
-    - name: Configurar CARP Virtual IPs
-      pfsensible.core.pfsense_virtual_ip:
-        interface: "{{ item.name | lower }}"
-        type: "carp"
-        address: "{{ item.vip }}"
-        subnet: "{{ item.subnet }}"
-        vhid: "{{ item.vhid }}"
-        advskew: "{{ item.advskew }}"
-        advbase: 1
-        password: "{{ carp_password }}"
-        descr: "VIP {{ item.name }}"
-        state: present
-      loop: "{{ vlans }}"
-      loop_control:
-        label: "CARP VIP {{ item.vip }}"
-      no_log: true  # Ocultar password en logs
+    # NOTA: El módulo pfsense_virtual_ip no está disponible en todas las versiones
+    # de pfsensible.core. Configurar manualmente en:
+    # Firewall → Virtual IPs → Add
+    # - Type: CARP
+    # - Interface: [nombre_vlan]
+    # - Address: [vip]/[subnet]
+    # - VHID: [vhid]
+    # - Advertising Frequency: Base 1, Skew [advskew]
+    # - Password: CARP_PASS_2024
+    
+    # - name: Configurar CARP Virtual IPs
+    #   pfsensible.core.pfsense_virtual_ip:
+    #     interface: "{{ item.name | lower }}"
+    #     type: "carp"
+    #     address: "{{ item.vip }}"
+    #     subnet: "{{ item.subnet }}"
+    #     vhid: "{{ item.vhid }}"
+    #     advskew: "{{ item.advskew }}"
+    #     advbase: 1
+    #     password: "{{ carp_password }}"
+    #     descr: "VIP {{ item.name }}"
+    #     state: present
+    #   loop: "{{ vlans }}"
+    #   loop_control:
+    #     label: "CARP VIP {{ item.vip }}"
+    #   no_log: true  # Ocultar password en logs
 
     # ========================================================================
     # CONFIGURAR NAT OUTBOUND

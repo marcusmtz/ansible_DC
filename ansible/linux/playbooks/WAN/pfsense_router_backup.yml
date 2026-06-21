@@ -214,22 +214,32 @@
     # ========================================================================
     # CONFIGURAR CARP (Virtual IPs) - BACKUP CON SKEW 100
     # ========================================================================
-    - name: Configurar CARP Virtual IPs (Backup mode)
-      pfsensible.core.pfsense_virtual_ip:
-        interface: "{{ item.name | lower }}"
-        type: "carp"
-        address: "{{ item.vip }}"
-        subnet: "{{ item.subnet }}"
-        vhid: "{{ item.vhid }}"
-        advskew: "{{ item.advskew }}"  # 100 para Backup
-        advbase: 1
-        password: "{{ carp_password }}"
-        descr: "VIP {{ item.name }} Backup"
-        state: present
-      loop: "{{ vlans }}"
-      loop_control:
-        label: "CARP VIP {{ item.vip }} (Skew {{ item.advskew }})"
-      no_log: true
+    # NOTA: El módulo pfsense_virtual_ip no está disponible en todas las versiones
+    # de pfsensible.core. Configurar manualmente en:
+    # Firewall → Virtual IPs → Add
+    # - Type: CARP
+    # - Interface: [nombre_vlan]
+    # - Address: [vip]/[subnet]
+    # - VHID: [vhid]
+    # - Advertising Frequency: Base 1, Skew 100 (BACKUP)
+    # - Password: CARP_PASS_2024
+    
+    # - name: Configurar CARP Virtual IPs (Backup mode)
+    #   pfsensible.core.pfsense_virtual_ip:
+    #     interface: "{{ item.name | lower }}"
+    #     type: "carp"
+    #     address: "{{ item.vip }}"
+    #     subnet: "{{ item.subnet }}"
+    #     vhid: "{{ item.vhid }}"
+    #     advskew: "{{ item.advskew }}"  # 100 para Backup
+    #     advbase: 1
+    #     password: "{{ carp_password }}"
+    #     descr: "VIP {{ item.name }} Backup"
+    #     state: present
+    #   loop: "{{ vlans }}"
+    #   loop_control:
+    #     label: "CARP VIP {{ item.vip }} (Skew {{ item.advskew }})"
+    #   no_log: true
 
     # ========================================================================
     # CONFIGURAR NAT OUTBOUND (igual que Master)
