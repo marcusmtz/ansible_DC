@@ -2,18 +2,19 @@
 - name: Configurar pfSense Router MASTER con CARP usando pfsensible.core + phpshell
   hosts: pfsense_router_master
   gather_facts: false
-  
+  connection: local
+
   vars:
-    # Configuración API pfSense
-    ansible_httpapi_host: "172.17.25.64"
-    ansible_httpapi_port: 443
-    ansible_httpapi_use_ssl: true
-    ansible_httpapi_validate_certs: false
-    ansible_network_os: pfsensible.core.pfsense
-    ansible_connection: httpapi
-    ansible_user: "admin"
-    ansible_password: "pfsense"
-    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    # Credenciales para API de pfSense
+    pfsense_host: "172.17.25.64"
+    pfsense_username: "admin"
+    pfsense_password: "pfsense"
+    
+    # Variables de conexión heredadas
+    ansible_host: "{{ pfsense_host }}"
+    ansible_user: "{{ pfsense_username }}"
+    ansible_password: "{{ pfsense_password }}"
+    ansible_python_interpreter: /usr/bin/python3
     
     wan1_interface: "vmx0"
     wan1_address: "172.17.25.64"
@@ -84,6 +85,9 @@
     # ========================================================================
     - name: Configurar sistema básico
       pfsensible.core.pfsense_setup:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         hostname: "{{ hostname }}"
         domain: "{{ domain }}"
         timezone: "{{ timezone }}"
@@ -95,6 +99,9 @@
     # ========================================================================
     - name: Crear alias RFC1918
       pfsensible.core.pfsense_alias:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "RFC1918"
         type: "network"
         address:
@@ -109,6 +116,9 @@
     # ========================================================================
     - name: Configurar WAN1
       pfsensible.core.pfsense_interface:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         descr: "WAN"
         interface: "{{ wan1_interface }}"
         ipv4_type: "static"
@@ -121,6 +131,9 @@
 
     - name: Gateway WAN1
       pfsensible.core.pfsense_gateway:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "{{ wan1_gateway_name }}"
         interface: "wan"
         gateway: "{{ wan1_gateway }}"
@@ -131,6 +144,9 @@
 
     - name: Configurar WAN2 (OPT1)
       pfsensible.core.pfsense_interface:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         descr: "WAN2"
         interface: "{{ wan2_interface }}"
         ipv4_type: "static"
@@ -143,6 +159,9 @@
 
     - name: Gateway WAN2
       pfsensible.core.pfsense_gateway:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "{{ wan2_gateway_name }}"
         interface: "opt1"
         gateway: "{{ wan2_gateway }}"
@@ -156,6 +175,9 @@
     # ========================================================================
     - name: Crear Gateway Group para Multi-WAN
       pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
@@ -196,6 +218,9 @@
     # ========================================================================
     - name: Crear VLANs
       pfsensible.core.pfsense_vlan:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         vlan_id: "{{ item.vlan_id }}"
         interface: "{{ trunk_interface }}"
         descr: "{{ item.descr }}"
@@ -204,6 +229,9 @@
 
     - name: Configurar interfaces VLAN
       pfsensible.core.pfsense_interface:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         descr: "{{ item.name }}"
         interface: "{{ trunk_interface }}.{{ item.vlan_id }}"
         ipv4_type: "static"
@@ -217,6 +245,9 @@
     # ========================================================================
     - name: Configurar CARP VIPs
       pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
@@ -267,6 +298,9 @@
     # ========================================================================
     - name: Configurar modo Hybrid Outbound NAT
       pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
@@ -286,6 +320,9 @@
     # ========================================================================
     - name: NAT VLANs hacia WAN1
       pfsensible.core.pfsense_nat_outbound:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         descr: "NAT {{ item.name }} via WAN1"
         interface: "wan"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
@@ -295,6 +332,9 @@
 
     - name: NAT VLANs hacia WAN2
       pfsensible.core.pfsense_nat_outbound:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         descr: "NAT {{ item.name }} via WAN2"
         interface: "opt1"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
@@ -307,6 +347,9 @@
     # ========================================================================
     - name: VLAN20 - Admin permite todo
       pfsensible.core.pfsense_rule:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "ADMIN_ALLOW_ALL"
         interface: "administracion"
         source: "administracion:network"
@@ -317,6 +360,9 @@
 
     - name: VLAN30 - TI permite todo
       pfsensible.core.pfsense_rule:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "TI_ALLOW_ALL"
         interface: "ti"
         source: "ti:network"
@@ -327,6 +373,9 @@
 
     - name: VLAN40 - Bloquear Admin
       pfsensible.core.pfsense_rule:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "VENTAS_BLOCK_ADMIN"
         interface: "ventas"
         source: "ventas:network"
@@ -337,6 +386,9 @@
 
     - name: VLAN40 - Bloquear TI
       pfsensible.core.pfsense_rule:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "VENTAS_BLOCK_TI"
         interface: "ventas"
         source: "ventas:network"
@@ -347,6 +399,9 @@
 
     - name: VLAN40 - Permitir Servidores
       pfsensible.core.pfsense_rule:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "VENTAS_TO_SERVIDORES"
         interface: "ventas"
         source: "ventas:network"
@@ -357,6 +412,9 @@
 
     - name: VLAN40 - Permitir Internet
       pfsensible.core.pfsense_rule:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "VENTAS_TO_INTERNET"
         interface: "ventas"
         source: "ventas:network"
@@ -367,6 +425,9 @@
 
     - name: VLAN10 - Servidores respuestas
       pfsensible.core.pfsense_rule:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         name: "SERVIDORES_ESTABLISHED"
         interface: "servidores"
         source: "servidores:network"
@@ -380,6 +441,9 @@
     # ========================================================================
     - name: Configurar DHCP Relay
       pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
@@ -401,6 +465,9 @@
     # ========================================================================
     - name: Configurar HA Sync (pfsync + XMLRPC)
       pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
@@ -447,6 +514,9 @@
     # ========================================================================
     - name: Aplicar filtros y routing
       pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
