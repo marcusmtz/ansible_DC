@@ -9,27 +9,21 @@
     pfsense_host: "172.17.25.64"
     pfsense_username: "admin"
     pfsense_password: "pfsense"
-    
-    # Variables de conexión heredadas
-    ansible_host: "{{ pfsense_host }}"
-    ansible_user: "{{ pfsense_username }}"
-    ansible_password: "{{ pfsense_password }}"
-    ansible_python_interpreter: /usr/bin/python3
-    
+
     wan1_interface: "vmx0"
     wan1_address: "172.17.25.64"
     wan1_subnet: "24"
     wan1_gateway: "172.17.25.121"
     wan1_gateway_name: "WAN1_GW"
-    
+
     wan2_interface: "vmx2"
     wan2_address: "168.17.25.2"
     wan2_subnet: "29"
     wan2_gateway: "168.17.25.1"
     wan2_gateway_name: "WAN2_GW"
-    
+
     trunk_interface: "vmx1"
-    
+
     vlans:
       - vlan_id: 10
         name: "SERVIDORES"
@@ -39,7 +33,7 @@
         vip: "192.168.10.1"
         vhid: 10
         advskew: 0
-        
+
       - vlan_id: 20
         name: "ADMINISTRACION"
         descr: "VLAN 20 - Administracion"
@@ -48,7 +42,7 @@
         vip: "192.168.20.1"
         vhid: 20
         advskew: 0
-        
+
       - vlan_id: 30
         name: "TI"
         descr: "VLAN 30 - TI"
@@ -57,7 +51,7 @@
         vip: "192.168.30.1"
         vhid: 30
         advskew: 0
-        
+
       - vlan_id: 40
         name: "VENTAS"
         descr: "VLAN 40 - Ventas"
@@ -66,11 +60,11 @@
         vip: "192.168.40.1"
         vhid: 40
         advskew: 0
-    
+
     carp_password: "CARP_PASS_2024"
     dhcp_relay_server: "192.168.10.5"
     ha_sync_peer: "192.168.10.3"
-    
+
     hostname: "pfsense-master"
     domain: "norcom.internal"
     timezone: "America/Lima"
@@ -80,10 +74,11 @@
       - "8.8.8.8"
 
   tasks:
+
     # ========================================================================
     # CONFIGURACION BASICA DEL SISTEMA
     # ========================================================================
-    - name: Configurar sistema básico (hostname, domain, timezone, DNS)
+    - name: Configurar sistema basico (hostname, domain, timezone, DNS)
       pfsensible.core.pfsense_phpshell:
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
@@ -91,16 +86,19 @@
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
-          
+
           global $config;
-          
+
           $config['system']['hostname'] = '{{ hostname }}';
           $config['system']['domain'] = '{{ domain }}';
           $config['system']['timezone'] = '{{ timezone }}';
           $config['system']['timeservers'] = 'pool.ntp.org';
-          
-          $config['system']['dnsserver'] = array('{{ dns_servers[0] }}', '{{ dns_servers[1] }}', '{{ dns_servers[2] }}');
-          
+          $config['system']['dnsserver'] = array(
+              '{{ dns_servers[0] }}',
+              '{{ dns_servers[1] }}',
+              '{{ dns_servers[2] }}'
+          );
+
           write_config("Sistema basico configurado via Ansible");
           system_hostname_configure();
           system_hosts_generate();
@@ -117,11 +115,11 @@
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
-          
+
           global $config;
           init_config_arr(array('aliases', 'alias'));
           $a_aliases = &$config['aliases']['alias'];
-          
+
           $found = false;
           foreach ($a_aliases as $idx => $alias) {
               if ($alias['name'] == 'RFC1918') {
@@ -129,14 +127,15 @@
                   break;
               }
           }
-          
+
           if (!$found) {
-              $new_alias = array();
-              $new_alias['name'] = 'RFC1918';
-              $new_alias['type'] = 'network';
-              $new_alias['address'] = '10.0.0.0/8 172.16.0.0/12 192.168.0.0/16';
-              $new_alias['descr'] = 'Redes privadas RFC1918';
-              $new_alias['detail'] = 'RFC1918||RFC1918||RFC1918';
+              $new_alias = array(
+                  'name'    => 'RFC1918',
+                  'type'    => 'network',
+                  'address' => '10.0.0.0/8 172.16.0.0/12 192.168.0.0/16',
+                  'descr'   => 'Redes privadas RFC1918',
+                  'detail'  => 'RFC1918||RFC1918||RFC1918'
+              );
               $a_aliases[] = $new_alias;
               write_config("Alias RFC1918 creado via Ansible");
           }
@@ -153,47 +152,45 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
-          
+
           global $config;
-          
-          // Configurar interfaz WAN1
-          $config['interfaces']['wan']['if'] = '{{ wan1_interface }}';
-          $config['interfaces']['wan']['descr'] = 'WAN';
-          $config['interfaces']['wan']['enable'] = true;
-          $config['interfaces']['wan']['ipaddr'] = '{{ wan1_address }}';
-          $config['interfaces']['wan']['subnet'] = '{{ wan1_subnet }}';
-          $config['interfaces']['wan']['gateway'] = '{{ wan1_gateway_name }}';
-          $config['interfaces']['wan']['blockbogons'] = false;
-          $config['interfaces']['wan']['blockpriv'] = false;
-          
-          // Configurar gateway WAN1
+
+          $config['interfaces']['wan']['if']          = '{{ wan1_interface }}';
+          $config['interfaces']['wan']['descr']        = 'WAN';
+          $config['interfaces']['wan']['enable']       = true;
+          $config['interfaces']['wan']['ipaddr']       = '{{ wan1_address }}';
+          $config['interfaces']['wan']['subnet']       = '{{ wan1_subnet }}';
+          $config['interfaces']['wan']['gateway']      = '{{ wan1_gateway_name }}';
+          $config['interfaces']['wan']['blockbogons']  = false;
+          $config['interfaces']['wan']['blockpriv']    = false;
+
           init_config_arr(array('gateways', 'gateway_item'));
           $a_gateways = &$config['gateways']['gateway_item'];
-          
+
           $found = false;
           foreach ($a_gateways as $idx => $gw) {
               if ($gw['name'] == '{{ wan1_gateway_name }}') {
-                  $found = true;
-                  $gw_idx = $idx;
+                  $found    = true;
+                  $gw_idx   = $idx;
                   break;
               }
           }
-          
+
           $gateway_data = array(
-              'name' => '{{ wan1_gateway_name }}',
-              'interface' => 'wan',
-              'gateway' => '{{ wan1_gateway }}',
-              'ipprotocol' => 'inet',
-              'descr' => 'Gateway ISP Principal',
+              'name'            => '{{ wan1_gateway_name }}',
+              'interface'       => 'wan',
+              'gateway'         => '{{ wan1_gateway }}',
+              'ipprotocol'      => 'inet',
+              'descr'           => 'Gateway ISP Principal',
               'monitor_disable' => false
           );
-          
+
           if ($found) {
               $a_gateways[$gw_idx] = $gateway_data;
           } else {
               $a_gateways[] = $gateway_data;
           }
-          
+
           write_config("WAN1 configurado via Ansible");
           interface_configure('wan');
 
@@ -209,51 +206,49 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
-          
+
           global $config;
-          
-          // Configurar interfaz WAN2 como OPT1
+
           if (!isset($config['interfaces']['opt1'])) {
               $config['interfaces']['opt1'] = array();
           }
-          
-          $config['interfaces']['opt1']['if'] = '{{ wan2_interface }}';
-          $config['interfaces']['opt1']['descr'] = 'WAN2';
-          $config['interfaces']['opt1']['enable'] = true;
-          $config['interfaces']['opt1']['ipaddr'] = '{{ wan2_address }}';
-          $config['interfaces']['opt1']['subnet'] = '{{ wan2_subnet }}';
-          $config['interfaces']['opt1']['gateway'] = '{{ wan2_gateway_name }}';
+
+          $config['interfaces']['opt1']['if']         = '{{ wan2_interface }}';
+          $config['interfaces']['opt1']['descr']       = 'WAN2';
+          $config['interfaces']['opt1']['enable']      = true;
+          $config['interfaces']['opt1']['ipaddr']      = '{{ wan2_address }}';
+          $config['interfaces']['opt1']['subnet']      = '{{ wan2_subnet }}';
+          $config['interfaces']['opt1']['gateway']     = '{{ wan2_gateway_name }}';
           $config['interfaces']['opt1']['blockbogons'] = false;
-          $config['interfaces']['opt1']['blockpriv'] = false;
-          
-          // Configurar gateway WAN2
+          $config['interfaces']['opt1']['blockpriv']   = false;
+
           init_config_arr(array('gateways', 'gateway_item'));
           $a_gateways = &$config['gateways']['gateway_item'];
-          
+
           $found = false;
           foreach ($a_gateways as $idx => $gw) {
               if ($gw['name'] == '{{ wan2_gateway_name }}') {
-                  $found = true;
+                  $found  = true;
                   $gw_idx = $idx;
                   break;
               }
           }
-          
+
           $gateway_data = array(
-              'name' => '{{ wan2_gateway_name }}',
-              'interface' => 'opt1',
-              'gateway' => '{{ wan2_gateway }}',
-              'ipprotocol' => 'inet',
-              'descr' => 'Gateway ISP Secundario',
+              'name'            => '{{ wan2_gateway_name }}',
+              'interface'       => 'opt1',
+              'gateway'         => '{{ wan2_gateway }}',
+              'ipprotocol'      => 'inet',
+              'descr'           => 'Gateway ISP Secundario',
               'monitor_disable' => false
           );
-          
+
           if ($found) {
               $a_gateways[$gw_idx] = $gateway_data;
           } else {
               $a_gateways[] = $gateway_data;
           }
-          
+
           write_config("WAN2 configurado via Ansible");
           interface_configure('opt1');
 
@@ -269,11 +264,11 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/gwlb.inc");
-          
+
           global $config;
           init_config_arr(array('gateways', 'gateway_group'));
           $a_gateway_groups = &$config['gateways']['gateway_group'];
-          
+
           $found = false;
           foreach ($a_gateway_groups as $idx => $group) {
               if ($group['name'] == 'DUAL_WAN_FAILOVER') {
@@ -281,15 +276,17 @@
                   break;
               }
           }
-          
+
           if (!$found) {
-              $new_group = array();
-              $new_group['name'] = 'DUAL_WAN_FAILOVER';
-              $new_group['descr'] = 'Dual WAN con failover automatico';
-              $new_group['trigger'] = 'down';
-              $new_group['item'] = array();
-              $new_group['item'][] = '{{ wan1_gateway_name }}|1';
-              $new_group['item'][] = '{{ wan2_gateway_name }}|1';
+              $new_group = array(
+                  'name'    => 'DUAL_WAN_FAILOVER',
+                  'descr'   => 'Dual WAN con failover automatico',
+                  'trigger' => 'down',
+                  'item'    => array(
+                      '{{ wan1_gateway_name }}|1',
+                      '{{ wan2_gateway_name }}|1'
+                  )
+              );
               $a_gateway_groups[] = $new_group;
               write_config("Gateway Group DUAL_WAN_FAILOVER creado via Ansible");
           }
@@ -297,7 +294,7 @@
     # ========================================================================
     # CREAR VLANs
     # ========================================================================
-    - name: Crear VLANs y configurar interfaces
+    - name: "Crear VLAN {{ item.vlan_id }} - {{ item.name }}"
       pfsensible.core.pfsense_phpshell:
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
@@ -306,12 +303,11 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
-          
+
           global $config;
           init_config_arr(array('vlans', 'vlan'));
           $a_vlans = &$config['vlans']['vlan'];
-          
-          // VLAN {{ item.vlan_id }}
+
           $found = false;
           foreach ($a_vlans as $idx => $vlan) {
               if ($vlan['tag'] == '{{ item.vlan_id }}' && $vlan['if'] == '{{ trunk_interface }}') {
@@ -319,36 +315,38 @@
                   break;
               }
           }
-          
+
           if (!$found) {
-              $new_vlan = array();
-              $new_vlan['if'] = '{{ trunk_interface }}';
-              $new_vlan['tag'] = '{{ item.vlan_id }}';
-              $new_vlan['descr'] = '{{ item.descr }}';
-              $new_vlan['vlanif'] = '{{ trunk_interface }}.{{ item.vlan_id }}';
+              $new_vlan = array(
+                  'if'     => '{{ trunk_interface }}',
+                  'tag'    => '{{ item.vlan_id }}',
+                  'descr'  => '{{ item.descr }}',
+                  'vlanif' => '{{ trunk_interface }}.{{ item.vlan_id }}'
+              );
               $a_vlans[] = $new_vlan;
           }
-          
-          // Configurar interfaz VLAN
-          $if_name = '{{ item.name | lower }}';
+
+          $if_name = strtolower('{{ item.name }}');
           if (!isset($config['interfaces'][$if_name])) {
               $config['interfaces'][$if_name] = array();
           }
-          
-          $config['interfaces'][$if_name]['if'] = '{{ trunk_interface }}.{{ item.vlan_id }}';
-          $config['interfaces'][$if_name]['descr'] = '{{ item.name }}';
+
+          $config['interfaces'][$if_name]['if']     = '{{ trunk_interface }}.{{ item.vlan_id }}';
+          $config['interfaces'][$if_name]['descr']  = '{{ item.name }}';
           $config['interfaces'][$if_name]['enable'] = true;
-          $config['interfaces'][$if_name]['ipaddr'] = '{{ item.ipaddr }}';
-          $config['interfaces'][$if_name]['subnet'] = '{{ item.subnet }}';
-          
-          write_config("VLAN {{ item.vlan_id }} configurada via Ansible");
+          $config['interfaces'][$if_name]['ipaddr']  = '{{ item.ipaddr }}';
+          $config['interfaces'][$if_name]['subnet']  = '{{ item.subnet }}';
+
+          write_config("VLAN {{ item.vlan_id }} {{ item.name }} configurada via Ansible");
           interface_configure($if_name);
       loop: "{{ vlans }}"
+      loop_control:
+        label: "VLAN {{ item.vlan_id }} - {{ item.name }}"
 
     # ========================================================================
     # CONFIGURAR CARP VIRTUAL IPs
     # ========================================================================
-    - name: Configurar CARP VIPs
+    - name: "Configurar CARP VIP {{ item.vip }} (VHID {{ item.vhid }})"
       pfsensible.core.pfsense_phpshell:
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
@@ -357,39 +355,44 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
-          
+
           global $config;
           init_config_arr(array('virtualip', 'vip'));
           $a_vip = &$config['virtualip']['vip'];
-          
+
+          $if_name = strtolower('{{ item.name }}');
+
           $vip_data = array(
-              'mode' => 'carp',
-              'interface' => '{{ item.name | lower }}',
-              'vhid' => '{{ item.vhid }}',
-              'advskew' => '{{ item.advskew }}',
-              'advbase' => '1',
-              'password' => '{{ carp_password }}',
-              'subnet' => '{{ item.vip }}',
+              'mode'        => 'carp',
+              'interface'   => $if_name,
+              'vhid'        => '{{ item.vhid }}',
+              'advskew'     => '{{ item.advskew }}',
+              'advbase'     => '1',
+              'password'    => '{{ carp_password }}',
+              'subnet'      => '{{ item.vip }}',
               'subnet_bits' => '{{ item.subnet }}',
-              'descr' => 'VIP {{ item.name }} MASTER'
+              'descr'       => 'VIP {{ item.name }} MASTER'
           );
-          
+
           $found = false;
           foreach ($a_vip as $idx => $vip) {
-              if ($vip['vhid'] == '{{ item.vhid }}' && $vip['interface'] == '{{ item.name | lower }}') {
+              if ($vip['vhid'] == '{{ item.vhid }}' && $vip['interface'] == $if_name) {
                   $a_vip[$idx] = $vip_data;
                   $found = true;
                   break;
               }
           }
-          
+
           if (!$found) {
               $a_vip[] = $vip_data;
           }
-          
+
           write_config("CARP VIP {{ item.vip }} MASTER configurado via Ansible");
-          interface_carp_configure();
+          // Aplica todas las VIPs (funcion correcta en pfSense)
+          interfaces_vips_configure();
       loop: "{{ vlans }}"
+      loop_control:
+        label: "CARP VIP {{ item.vip }} VHID {{ item.vhid }}"
       no_log: true
 
     # ========================================================================
@@ -403,7 +406,7 @@
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
-          
+
           global $config;
           init_config_arr(array('nat', 'outbound'));
           $config['nat']['outbound']['mode'] = 'hybrid';
@@ -412,7 +415,7 @@
     # ========================================================================
     # NAT OUTBOUND RULES
     # ========================================================================
-    - name: Crear reglas NAT Outbound hacia WAN1 y WAN2
+    - name: "Crear reglas NAT Outbound para {{ item.name }}"
       pfsensible.core.pfsense_phpshell:
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
@@ -420,61 +423,54 @@
         command: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
-          
+
           global $config;
           init_config_arr(array('nat', 'outbound', 'rule'));
           $a_nat = &$config['nat']['outbound']['rule'];
-          
-          // NAT hacia WAN1
+
           $nat_wan1 = array(
-              'interface' => 'wan',
-              'source' => array('network' => '{{ item.ipaddr }}/{{ item.subnet }}'),
-              'destination' => array('any' => true),
-              'descr' => 'NAT {{ item.name }} via WAN1',
-              'target' => '',
-              'natport' => '',
+              'interface'     => 'wan',
+              'source'        => array('network' => '{{ item.ipaddr }}/{{ item.subnet }}'),
+              'destination'   => array('any' => true),
+              'descr'         => 'NAT {{ item.name }} via WAN1',
+              'target'        => '',
+              'natport'       => '',
               'staticnatport' => false,
-              'disabled' => false
+              'disabled'      => false
           );
-          
-          // NAT hacia WAN2
+
           $nat_wan2 = array(
-              'interface' => 'opt1',
-              'source' => array('network' => '{{ item.ipaddr }}/{{ item.subnet }}'),
-              'destination' => array('any' => true),
-              'descr' => 'NAT {{ item.name }} via WAN2',
-              'target' => '',
-              'natport' => '',
+              'interface'     => 'opt1',
+              'source'        => array('network' => '{{ item.ipaddr }}/{{ item.subnet }}'),
+              'destination'   => array('any' => true),
+              'descr'         => 'NAT {{ item.name }} via WAN2',
+              'target'        => '',
+              'natport'       => '',
               'staticnatport' => false,
-              'disabled' => false
+              'disabled'      => false
           );
-          
-          // Verificar si ya existen
+
           $found_wan1 = false;
           $found_wan2 = false;
-          foreach ($a_nat as $idx => $rule) {
-              if (isset($rule['descr']) && $rule['descr'] == 'NAT {{ item.name }} via WAN1') {
-                  $found_wan1 = true;
-              }
-              if (isset($rule['descr']) && $rule['descr'] == 'NAT {{ item.name }} via WAN2') {
-                  $found_wan2 = true;
+          foreach ($a_nat as $rule) {
+              if (isset($rule['descr'])) {
+                  if ($rule['descr'] == 'NAT {{ item.name }} via WAN1') { $found_wan1 = true; }
+                  if ($rule['descr'] == 'NAT {{ item.name }} via WAN2') { $found_wan2 = true; }
               }
           }
-          
-          if (!$found_wan1) {
-              $a_nat[] = $nat_wan1;
-          }
-          if (!$found_wan2) {
-              $a_nat[] = $nat_wan2;
-          }
-          
+
+          if (!$found_wan1) { $a_nat[] = $nat_wan1; }
+          if (!$found_wan2) { $a_nat[] = $nat_wan2; }
+
           write_config("NAT Outbound {{ item.name }} configurado via Ansible");
       loop: "{{ vlans }}"
+      loop_control:
+        label: "NAT {{ item.name }}"
 
     # ========================================================================
     # REGLAS DE FIREWALL
     # ========================================================================
-    - name: Crear reglas de firewall para todas las VLANs
+    - name: Crear reglas de firewall para segmentacion de VLANs
       pfsensible.core.pfsense_phpshell:
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
@@ -483,12 +479,11 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/filter.inc");
-          
+
           global $config;
           init_config_arr(array('filter', 'rule'));
           $a_filter = &$config['filter']['rule'];
-          
-          // Función para verificar si regla existe
+
           function rule_exists($rules, $descr) {
               foreach ($rules as $rule) {
                   if (isset($rule['descr']) && $rule['descr'] == $descr) {
@@ -497,105 +492,98 @@
               }
               return false;
           }
-          
+
           // VLAN 20 - ADMINISTRACION: Permite todo
           if (!rule_exists($a_filter, 'Administracion acceso completo')) {
-              $rule = array(
-                  'type' => 'pass',
-                  'interface' => 'administracion',
+              $a_filter[] = array(
+                  'type'       => 'pass',
+                  'interface'  => 'administracion',
                   'ipprotocol' => 'inet',
-                  'protocol' => 'any',
-                  'source' => array('network' => 'administracion'),
-                  'destination' => array('any' => true),
-                  'descr' => 'Administracion acceso completo'
+                  'protocol'   => 'any',
+                  'source'     => array('network' => 'administracion'),
+                  'destination'=> array('any' => true),
+                  'descr'      => 'Administracion acceso completo'
               );
-              $a_filter[] = $rule;
           }
-          
+
           // VLAN 30 - TI: Permite todo
           if (!rule_exists($a_filter, 'TI acceso completo')) {
-              $rule = array(
-                  'type' => 'pass',
-                  'interface' => 'ti',
+              $a_filter[] = array(
+                  'type'       => 'pass',
+                  'interface'  => 'ti',
                   'ipprotocol' => 'inet',
-                  'protocol' => 'any',
-                  'source' => array('network' => 'ti'),
-                  'destination' => array('any' => true),
-                  'descr' => 'TI acceso completo'
+                  'protocol'   => 'any',
+                  'source'     => array('network' => 'ti'),
+                  'destination'=> array('any' => true),
+                  'descr'      => 'TI acceso completo'
               );
-              $a_filter[] = $rule;
           }
-          
+
           // VLAN 40 - VENTAS: Bloquear Admin
           if (!rule_exists($a_filter, 'Ventas bloqueado a Admin')) {
-              $rule = array(
-                  'type' => 'block',
-                  'interface' => 'ventas',
+              $a_filter[] = array(
+                  'type'       => 'block',
+                  'interface'  => 'ventas',
                   'ipprotocol' => 'inet',
-                  'protocol' => 'any',
-                  'source' => array('network' => 'ventas'),
-                  'destination' => array('network' => 'administracion'),
-                  'descr' => 'Ventas bloqueado a Admin'
+                  'protocol'   => 'any',
+                  'source'     => array('network' => 'ventas'),
+                  'destination'=> array('network' => 'administracion'),
+                  'descr'      => 'Ventas bloqueado a Admin'
               );
-              $a_filter[] = $rule;
           }
-          
+
           // VLAN 40 - VENTAS: Bloquear TI
           if (!rule_exists($a_filter, 'Ventas bloqueado a TI')) {
-              $rule = array(
-                  'type' => 'block',
-                  'interface' => 'ventas',
+              $a_filter[] = array(
+                  'type'       => 'pass',
+                  'interface'  => 'ventas',
                   'ipprotocol' => 'inet',
-                  'protocol' => 'any',
-                  'source' => array('network' => 'ventas'),
-                  'destination' => array('network' => 'ti'),
-                  'descr' => 'Ventas bloqueado a TI'
+                  'protocol'   => 'any',
+                  'source'     => array('network' => 'ventas'),
+                  'destination'=> array('network' => 'ti'),
+                  'descr'      => 'Ventas bloqueado a TI'
               );
-              $a_filter[] = $rule;
           }
-          
+
           // VLAN 40 - VENTAS: Permitir Servidores
           if (!rule_exists($a_filter, 'Ventas a Servidores')) {
-              $rule = array(
-                  'type' => 'pass',
-                  'interface' => 'ventas',
+              $a_filter[] = array(
+                  'type'       => 'pass',
+                  'interface'  => 'ventas',
                   'ipprotocol' => 'inet',
-                  'protocol' => 'any',
-                  'source' => array('network' => 'ventas'),
-                  'destination' => array('network' => 'servidores'),
-                  'descr' => 'Ventas a Servidores'
+                  'protocol'   => 'any',
+                  'source'     => array('network' => 'ventas'),
+                  'destination'=> array('network' => 'servidores'),
+                  'descr'      => 'Ventas a Servidores'
               );
-              $a_filter[] = $rule;
           }
-          
+
           // VLAN 40 - VENTAS: Permitir Internet (no RFC1918)
           if (!rule_exists($a_filter, 'Ventas a Internet')) {
-              $rule = array(
-                  'type' => 'pass',
-                  'interface' => 'ventas',
+              $a_filter[] = array(
+                  'type'       => 'pass',
+                  'interface'  => 'ventas',
                   'ipprotocol' => 'inet',
-                  'protocol' => 'any',
-                  'source' => array('network' => 'ventas'),
-                  'destination' => array('address' => '!RFC1918'),
-                  'descr' => 'Ventas a Internet'
+                  'protocol'   => 'any',
+                  'source'     => array('network' => 'ventas'),
+                  'destination'=> array('address' => '!RFC1918'),
+                  'descr'      => 'Ventas a Internet'
               );
-              $a_filter[] = $rule;
           }
-          
+
           // VLAN 10 - SERVIDORES: Permitir respuestas
           if (!rule_exists($a_filter, 'Servidores respuestas')) {
-              $rule = array(
-                  'type' => 'pass',
-                  'interface' => 'servidores',
+              $a_filter[] = array(
+                  'type'       => 'pass',
+                  'interface'  => 'servidores',
                   'ipprotocol' => 'inet',
-                  'protocol' => 'any',
-                  'source' => array('network' => 'servidores'),
-                  'destination' => array('any' => true),
-                  'descr' => 'Servidores respuestas'
+                  'protocol'   => 'any',
+                  'source'     => array('network' => 'servidores'),
+                  'destination'=> array('any' => true),
+                  'descr'      => 'Servidores respuestas'
               );
-              $a_filter[] = $rule;
           }
-          
+
           write_config("Reglas de firewall configuradas via Ansible");
 
     # ========================================================================
@@ -610,15 +598,17 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/services.inc");
-          
+
           global $config;
           if (!is_array($config['dhcrelay'])) {
               $config['dhcrelay'] = array();
           }
-          $config['dhcrelay']['enable'] = 'true';
-          $config['dhcrelay']['interface'] = 'administracion,ti,ventas';
-          $config['dhcrelay']['server'] = '{{ dhcp_relay_server }}';
+
+          $config['dhcrelay']['enable']      = 'true';
+          $config['dhcrelay']['interface']   = 'administracion,ti,ventas';
+          $config['dhcrelay']['server']      = '{{ dhcp_relay_server }}';
           $config['dhcrelay']['agentoption'] = '';
+
           write_config("DHCP Relay configurado via Ansible");
           services_dhcrelay_configure();
 
@@ -634,47 +624,48 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/interfaces.inc");
-          
+
           global $config;
           if (!is_array($config['hasync'])) {
               $config['hasync'] = array();
           }
-          
+
           // pfsync
-          $config['hasync']['pfsyncenabled'] = 'on';
-          $config['hasync']['pfsyncinterface'] = 'servidores';
-          $config['hasync']['pfsyncpeerip'] = '{{ ha_sync_peer }}';
-          
+          $config['hasync']['pfsyncenabled']  = 'on';
+          $config['hasync']['pfsyncinterface']= 'servidores';
+          $config['hasync']['pfsyncpeerip']   = '{{ ha_sync_peer }}';
+
           // XMLRPC Sync
-          $config['hasync']['synchronizetoip'] = '{{ ha_sync_peer }}';
-          $config['hasync']['username'] = '{{ pfsense_username }}';
-          $config['hasync']['password'] = '{{ pfsense_password }}';
-          $config['hasync']['synchronizeauthservers'] = 'on';
-          $config['hasync']['synchronizecerts'] = 'on';
-          $config['hasync']['synchronizerules'] = 'on';
-          $config['hasync']['synchronizeschedules'] = 'on';
-          $config['hasync']['synchronizealiases'] = 'on';
-          $config['hasync']['synchronizenat'] = 'on';
-          $config['hasync']['synchronizeipsec'] = 'on';
-          $config['hasync']['synchronizeopenvpn'] = 'on';
-          $config['hasync']['synchronizedhcpd'] = 'on';
-          $config['hasync']['synchronizewol'] = 'on';
-          $config['hasync']['synchronizestaticroutes'] = 'on';
-          $config['hasync']['synchronizelb'] = 'on';
-          $config['hasync']['synchronizevirtualip'] = 'on';
-          $config['hasync']['synchronizetrafficshaper'] = 'on';
-          $config['hasync']['synchronizetrafficshaperlimiter'] = 'on';
-          $config['hasync']['synchronizednsforwarder'] = 'on';
-          $config['hasync']['synchronizecaptiveportal'] = 'on';
-          
+          $config['hasync']['synchronizetoip']                    = '{{ ha_sync_peer }}';
+          $config['hasync']['username']                           = '{{ pfsense_username }}';
+          $config['hasync']['password']                           = '{{ pfsense_password }}';
+          $config['hasync']['synchronizeauthservers']             = 'on';
+          $config['hasync']['synchronizecerts']                   = 'on';
+          $config['hasync']['synchronizerules']                   = 'on';
+          $config['hasync']['synchronizeschedules']               = 'on';
+          $config['hasync']['synchronizealiases']                 = 'on';
+          $config['hasync']['synchronizenat']                     = 'on';
+          $config['hasync']['synchronizeipsec']                   = 'on';
+          $config['hasync']['synchronizeopenvpn']                 = 'on';
+          $config['hasync']['synchronizedhcpd']                   = 'on';
+          $config['hasync']['synchronizewol']                     = 'on';
+          $config['hasync']['synchronizestaticroutes']            = 'on';
+          $config['hasync']['synchronizelb']                      = 'on';
+          $config['hasync']['synchronizevirtualip']               = 'on';
+          $config['hasync']['synchronizetrafficshaper']           = 'on';
+          $config['hasync']['synchronizetrafficshaperlimiter']    = 'on';
+          $config['hasync']['synchronizednsforwarder']            = 'on';
+          $config['hasync']['synchronizecaptiveportal']           = 'on';
+
           write_config("HA Sync configurado via Ansible");
-          interfaces_sync_setup();
+          // Recargar pfsync via filtros (interfaces_sync_setup no existe en pfSense CE)
+          filter_configure();
       no_log: true
 
     # ========================================================================
     # APLICAR CONFIGURACION FINAL
     # ========================================================================
-    - name: Aplicar filtros y routing
+    - name: Aplicar filtros y limpiar flags dirty
       pfsensible.core.pfsense_phpshell:
         pfsense_host: "{{ pfsense_host }}"
         pfsense_username: "{{ pfsense_username }}"
@@ -683,7 +674,7 @@
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
           require_once("/etc/inc/filter.inc");
-          
+
           filter_configure();
           clear_subsystem_dirty('natconf');
           clear_subsystem_dirty('filter');
@@ -691,37 +682,30 @@
     # ========================================================================
     # RESUMEN FINAL
     # ========================================================================
-    - name: Resumen de configuración
+    - name: Resumen de configuracion
       ansible.builtin.debug:
         msg:
           - "=========================================="
           - "PFSENSE MASTER - CONFIGURADO VIA PHPSHELL"
           - "=========================================="
-          - ""
-          - "✅ Configuración completa usando pfsense_phpshell:"
-          - "  - Sistema básico (hostname, domain, DNS, timezone)"
+          - "Configuracion completa:"
+          - "  - Sistema basico (hostname={{ hostname }}, domain={{ domain }})"
           - "  - Alias RFC1918"
-          - "  - Interfaces WAN1 ({{ wan1_address }})"
-          - "  - Interfaces WAN2 ({{ wan2_address }})"
-          - "  - Gateways WAN1_GW y WAN2_GW"
-          - "  - Gateway Group DUAL_WAN_FAILOVER"
-          - "  - 4 VLANs (10, 20, 30, 40)"
-          - "  - CARP Virtual IPs (advskew=0 MASTER)"
-          - "  - NAT Outbound Hybrid + Reglas"
-          - "  - Reglas de Firewall (segmentación VLANs)"
-          - "  - DHCP Relay hacia {{ dhcp_relay_server }}"
-          - "  - HA Sync (pfsync + XMLRPC) hacia {{ ha_sync_peer }}"
-          - ""
+          - "  - WAN1: {{ wan1_address }}/{{ wan1_subnet }} GW={{ wan1_gateway }}"
+          - "  - WAN2: {{ wan2_address }}/{{ wan2_subnet }} GW={{ wan2_gateway }}"
+          - "  - Gateway Group: DUAL_WAN_FAILOVER"
+          - "  - VLANs: 10 (SERVIDORES), 20 (ADMIN), 30 (TI), 40 (VENTAS)"
+          - "  - CARP VIPs configuradas (advskew=0 -> MASTER)"
+          - "  - NAT Outbound Hybrid + reglas por VLAN"
+          - "  - Firewall: segmentacion inter-VLAN aplicada"
+          - "  - DHCP Relay -> {{ dhcp_relay_server }}"
+          - "  - HA Sync (pfsync+XMLRPC) -> {{ ha_sync_peer }}"
+          - "=========================================="
           - "Acceso Web: https://{{ pfsense_host }}"
-          - "Usuario: {{ pfsense_username }}"
-          - ""
-          - "Verificar en la Web UI:"
-          - "  1. Status → CARP (debe mostrar MASTER)"
-          - "  2. Status → Gateways (ambos Online)"
-          - "  3. System → Routing → Gateway Groups"
-          - "  4. Firewall → Virtual IPs (4 VIPs con VHID 10,20,30,40)"
-          - "  5. System → High Avail. Sync (configurado)"
-          - ""
-          - "Siguiente paso:"
-          - "  Ejecutar playbook de BACKUP"
+          - "Verificar:"
+          - "  1. Status > CARP  (debe mostrar MASTER)"
+          - "  2. Status > Gateways (WAN1 y WAN2 Online)"
+          - "  3. System > Routing > Gateway Groups"
+          - "  4. Firewall > Virtual IPs (VHID 10/20/30/40)"
+          - "  5. System > High Avail. Sync (peer={{ ha_sync_peer }})"
           - "=========================================="
