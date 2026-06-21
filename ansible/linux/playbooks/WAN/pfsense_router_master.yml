@@ -2,8 +2,13 @@
 - name: Configurar pfSense Router MASTER con CARP usando pfsensible.core + phpshell
   hosts: pfsense_router_master
   gather_facts: false
+  connection: local
   
   vars:
+    ansible_connection: local
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    
+    # Credenciales para API de pfSense
     pfsense_host: "172.17.25.64"
     pfsense_username: "admin"
     pfsense_password: "pfsense"
