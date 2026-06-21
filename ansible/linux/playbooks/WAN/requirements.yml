@@ -12,6 +12,5 @@ collections:
   - name: community.general
     version: ">=7.0.0"
   
-  # Colección de pfSense (versión más reciente)
+  # Colección de pfSense (última versión disponible)
   - name: pfsensible.core
-    version: "0.71"
