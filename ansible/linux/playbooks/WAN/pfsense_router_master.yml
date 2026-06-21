@@ -256,9 +256,13 @@
     # ========================================================================
     # CONFIGURAR NAT OUTBOUND
     # ========================================================================
-    - name: Habilitar modo Hybrid Outbound NAT
-      pfsensible.core.pfsense_nat_outbound_mode:
-        mode: "hybrid"
+    # NOTA: El módulo pfsense_nat_outbound_mode no está disponible.
+    # Configurar manualmente en: Firewall → NAT → Outbound
+    # - Mode: Hybrid Outbound NAT
+    
+    # - name: Habilitar modo Hybrid Outbound NAT
+    #   pfsensible.core.pfsense_nat_outbound_mode:
+    #     mode: "hybrid"
 
     - name: Configurar NAT para VLANs hacia WAN1
       pfsensible.core.pfsense_nat_outbound:
