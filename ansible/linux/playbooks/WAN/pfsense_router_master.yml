@@ -1,15 +1,13 @@
 ---
-- name: Configurar pfSense Router MASTER usando netgate.pfsense
+- name: Configurar pfSense Router MASTER con CARP usando pfsensible.core + phpshell
   hosts: pfsense_router_master
   gather_facts: false
   
   vars:
-    # === Credenciales pfSense ===
     pfsense_host: "172.17.25.64"
     pfsense_username: "admin"
     pfsense_password: "pfsense"
     
-    # === Interfaces WAN ===
     wan1_interface: "vmx0"
     wan1_address: "172.17.25.64"
     wan1_subnet: "24"
@@ -22,10 +20,8 @@
     wan2_gateway: "168.17.25.1"
     wan2_gateway_name: "WAN2_GW"
     
-    # === LAN Trunk ===
     trunk_interface: "vmx1"
     
-    # === VLANs ===
     vlans:
       - vlan_id: 10
         name: "SERVIDORES"
@@ -63,12 +59,10 @@
         vhid: 40
         advskew: 0
     
-    # === HA ===
     carp_password: "CARP_PASS_2024"
     dhcp_relay_server: "192.168.10.5"
     ha_sync_peer: "192.168.10.3"
     
-    # === Sistema ===
     hostname: "pfsense-master"
     domain: "norcom.internal"
     timezone: "America/Lima"
@@ -82,9 +76,10 @@
     # CONFIGURACION BASICA
     # ========================================================================
     - name: Configurar sistema básico
-      netgate.pfsense.pfsense_setup:
+      pfsensible.core.pfsense_setup:
         hostname: "{{ hostname }}"
         domain: "{{ domain }}"
+        timeservers: "pool.ntp.org"
         timezone: "{{ timezone }}"
         dnsserver: "{{ dns_servers }}"
 
@@ -92,237 +87,345 @@
     # ALIAS RFC1918
     # ========================================================================
     - name: Crear alias RFC1918
-      netgate.pfsense.pfsense_aggregate:
-        aggregated_config:
-          aliases:
-            - name: "RFC1918"
-              type: "network"
-              descr: "Redes privadas RFC1918"
-              address:
-                - "10.0.0.0/8"
-                - "172.16.0.0/12"
-                - "192.168.0.0/16"
+      pfsensible.core.pfsense_alias:
+        name: "RFC1918"
+        type: "network"
+        address:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+        descr: "Redes privadas RFC1918"
+        state: present
 
     # ========================================================================
     # INTERFACES WAN
     # ========================================================================
     - name: Configurar WAN1
-      netgate.pfsense.pfsense_interface:
+      pfsensible.core.pfsense_interface:
         descr: "WAN"
         interface: "{{ wan1_interface }}"
         ipaddr: "{{ wan1_address }}"
         subnet: "{{ wan1_subnet }}"
-        gateway: "{{ wan1_gateway_name }}"
-        enable: true
+        enable: yes
 
-    - name: Configurar gateway WAN1
-      netgate.pfsense.pfsense_gateway:
+    - name: Gateway WAN1
+      pfsensible.core.pfsense_gateway:
         name: "{{ wan1_gateway_name }}"
         interface: "wan"
         gateway: "{{ wan1_gateway }}"
-        monitor_disable: false
+        ipprotocol: "inet"
+        monitor_disable: no
+        descr: "Gateway ISP Principal"
+        state: present
 
     - name: Configurar WAN2 (OPT1)
-      netgate.pfsense.pfsense_interface:
+      pfsensible.core.pfsense_interface:
         descr: "WAN2"
         interface: "{{ wan2_interface }}"
         ipaddr: "{{ wan2_address }}"
         subnet: "{{ wan2_subnet }}"
-        gateway: "{{ wan2_gateway_name }}"
-        enable: true
+        enable: yes
 
-    - name: Configurar gateway WAN2
-      netgate.pfsense.pfsense_gateway:
+    - name: Gateway WAN2
+      pfsensible.core.pfsense_gateway:
         name: "{{ wan2_gateway_name }}"
         interface: "opt1"
         gateway: "{{ wan2_gateway }}"
-        monitor_disable: false
+        ipprotocol: "inet"
+        monitor_disable: no
+        descr: "Gateway ISP Secundario"
+        state: present
 
     # ========================================================================
-    # VLAN CONFIGURATION
+    # GATEWAY GROUP via PHPShell
     # ========================================================================
-    - name: Configurar VLANs y CARP usando aggregate
-      netgate.pfsense.pfsense_aggregate:
-        aggregated_config:
-          vlans:
-            - vlan_id: 10
-              interface: "{{ trunk_interface }}"
-              descr: "VLAN 10 - Servidores"
-            - vlan_id: 20
-              interface: "{{ trunk_interface }}"
-              descr: "VLAN 20 - Administracion"
-            - vlan_id: 30
-              interface: "{{ trunk_interface }}"
-              descr: "VLAN 30 - TI"
-            - vlan_id: 40
-              interface: "{{ trunk_interface }}"
-              descr: "VLAN 40 - Ventas"
+    - name: Crear Gateway Group para Multi-WAN
+      pfsensible.core.pfsense_phpshell:
+        command: |
+          require_once("gwlb.inc");
+          init_config_arr(array('gateways', 'gateway_group'));
+          $a_gateway_groups = &$config['gateways']['gateway_group'];
+          
+          $found = false;
+          foreach ($a_gateway_groups as $idx => $group) {
+              if ($group['name'] == 'DUAL_WAN_FAILOVER') {
+                  $found = true;
+                  break;
+              }
+          }
+          
+          if (!$found) {
+              $new_group = array();
+              $new_group['name'] = 'DUAL_WAN_FAILOVER';
+              $new_group['descr'] = 'Dual WAN con failover automatico';
+              $new_group['trigger'] = 'down';
+              $new_group['item'] = array();
+              $new_group['item'][] = '{{ wan1_gateway_name }}|1';
+              $new_group['item'][] = '{{ wan2_gateway_name }}|1';
+              $a_gateway_groups[] = $new_group;
+              write_config("Gateway Group DUAL_WAN_FAILOVER creado via Ansible");
+          }
+
+    # ========================================================================
+    # VLANs
+    # ========================================================================
+    - name: Crear VLANs
+      pfsensible.core.pfsense_vlan:
+        vlan_id: "{{ item.vlan_id }}"
+        interface: "{{ trunk_interface }}"
+        descr: "{{ item.descr }}"
+        state: present
+      loop: "{{ vlans }}"
 
     - name: Configurar interfaces VLAN
-      netgate.pfsense.pfsense_interface:
+      pfsensible.core.pfsense_interface:
         descr: "{{ item.name }}"
         interface: "{{ trunk_interface }}.{{ item.vlan_id }}"
         ipaddr: "{{ item.ipaddr }}"
         subnet: "{{ item.subnet }}"
-        enable: true
+        enable: yes
       loop: "{{ vlans }}"
 
     # ========================================================================
-    # CARP VIRTUAL IPs
+    # CARP VIRTUAL IPs via PHPShell
     # ========================================================================
     - name: Configurar CARP VIPs
-      netgate.pfsense.pfsense_virtual_ip:
-        interface: "{{ item.name | lower }}"
-        mode: "carp"
-        vhid: "{{ item.vhid }}"
-        advskew: "{{ item.advskew }}"
-        advbase: 1
-        password: "{{ carp_password }}"
-        address: "{{ item.vip }}"
-        subnet_bits: "{{ item.subnet }}"
-        descr: "VIP {{ item.name }}"
+      pfsensible.core.pfsense_phpshell:
+        command: |
+          init_config_arr(array('virtualip', 'vip'));
+          $a_vip = &$config['virtualip']['vip'];
+          
+          $vip_data = array(
+              'mode' => 'carp',
+              'interface' => '{{ item.name | lower }}',
+              'vhid' => '{{ item.vhid }}',
+              'advskew' => '{{ item.advskew }}',
+              'advbase' => '1',
+              'password' => '{{ carp_password }}',
+              'subnet' => '{{ item.vip }}',
+              'subnet_bits' => '{{ item.subnet }}',
+              'descr' => 'VIP {{ item.name }}'
+          );
+          
+          $found = false;
+          foreach ($a_vip as $idx => $vip) {
+              if ($vip['vhid'] == '{{ item.vhid }}' && $vip['interface'] == '{{ item.name | lower }}') {
+                  $a_vip[$idx] = $vip_data;
+                  $found = true;
+                  break;
+              }
+          }
+          
+          if (!$found) {
+              $a_vip[] = $vip_data;
+          }
+          
+          write_config("CARP VIP {{ item.vip }} configurado via Ansible");
+          interface_carp_configure();
       loop: "{{ vlans }}"
       no_log: true
 
     # ========================================================================
-    # NAT OUTBOUND
+    # NAT OUTBOUND MODE via PHPShell
     # ========================================================================
-    - name: Configurar modo NAT Outbound
-      netgate.pfsense.pfsense_outbound_nat:
-        mode: "hybrid"
+    - name: Configurar modo Hybrid Outbound NAT
+      pfsensible.core.pfsense_phpshell:
+        command: |
+          if (!isset($config['nat']['outbound'])) {
+              $config['nat']['outbound'] = array();
+          }
+          $config['nat']['outbound']['mode'] = 'hybrid';
+          write_config("NAT Outbound mode configurado a Hybrid via Ansible");
 
-    - name: Reglas NAT hacia WAN1
-      netgate.pfsense.pfsense_outbound_nat_rule:
+    # ========================================================================
+    # NAT OUTBOUND RULES
+    # ========================================================================
+    - name: NAT VLANs hacia WAN1
+      pfsensible.core.pfsense_nat_outbound:
         interface: "wan"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
         descr: "NAT {{ item.name }} via WAN1"
-        nat_address: "interface_address"
+        state: present
       loop: "{{ vlans }}"
 
-    - name: Reglas NAT hacia WAN2
-      netgate.pfsense.pfsense_outbound_nat_rule:
+    - name: NAT VLANs hacia WAN2
+      pfsensible.core.pfsense_nat_outbound:
         interface: "opt1"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
         descr: "NAT {{ item.name }} via WAN2"
-        nat_address: "interface_address"
+        state: present
       loop: "{{ vlans }}"
 
     # ========================================================================
     # FIREWALL RULES
     # ========================================================================
-    - name: VLAN20 - Administracion permite todo
-      netgate.pfsense.pfsense_rule:
+    - name: VLAN20 - Admin permite todo
+      pfsensible.core.pfsense_rule:
         name: "ADMIN_ALLOW_ALL"
         interface: "administracion"
         source: "administracion:network"
         destination: "any"
         action: "pass"
         descr: "Administracion acceso completo"
+        state: present
 
     - name: VLAN30 - TI permite todo
-      netgate.pfsense.pfsense_rule:
+      pfsensible.core.pfsense_rule:
         name: "TI_ALLOW_ALL"
         interface: "ti"
         source: "ti:network"
         destination: "any"
         action: "pass"
         descr: "TI acceso completo"
+        state: present
 
     - name: VLAN40 - Bloquear Admin
-      netgate.pfsense.pfsense_rule:
+      pfsensible.core.pfsense_rule:
         name: "VENTAS_BLOCK_ADMIN"
         interface: "ventas"
         source: "ventas:network"
         destination: "administracion:network"
         action: "block"
         descr: "Ventas bloqueado a Admin"
+        state: present
 
     - name: VLAN40 - Bloquear TI
-      netgate.pfsense.pfsense_rule:
+      pfsensible.core.pfsense_rule:
         name: "VENTAS_BLOCK_TI"
         interface: "ventas"
         source: "ventas:network"
         destination: "ti:network"
         action: "block"
         descr: "Ventas bloqueado a TI"
+        state: present
 
     - name: VLAN40 - Permitir Servidores
-      netgate.pfsense.pfsense_rule:
+      pfsensible.core.pfsense_rule:
         name: "VENTAS_TO_SERVIDORES"
         interface: "ventas"
         source: "ventas:network"
         destination: "servidores:network"
         action: "pass"
         descr: "Ventas a Servidores"
+        state: present
 
     - name: VLAN40 - Permitir Internet
-      netgate.pfsense.pfsense_rule:
+      pfsensible.core.pfsense_rule:
         name: "VENTAS_TO_INTERNET"
         interface: "ventas"
         source: "ventas:network"
         destination: "!RFC1918"
         action: "pass"
         descr: "Ventas a Internet"
+        state: present
 
     - name: VLAN10 - Servidores respuestas
-      netgate.pfsense.pfsense_rule:
+      pfsensible.core.pfsense_rule:
         name: "SERVIDORES_ESTABLISHED"
         interface: "servidores"
         source: "servidores:network"
         destination: "any"
         action: "pass"
-        statetype: "keep state"
-        descr: "Servidores respuestas establecidas"
+        descr: "Servidores respuestas"
+        state: present
 
     # ========================================================================
-    # DHCP RELAY
+    # DHCP RELAY via PHPShell
     # ========================================================================
     - name: Configurar DHCP Relay
-      netgate.pfsense.pfsense_dhcp_relay:
-        interface:
-          - "administracion"
-          - "ti"
-          - "ventas"
-        server: "{{ dhcp_relay_server }}"
+      pfsensible.core.pfsense_phpshell:
+        command: |
+          if (!isset($config['dhcrelay'])) {
+              $config['dhcrelay'] = array();
+          }
+          $config['dhcrelay']['enable'] = 'true';
+          $config['dhcrelay']['interface'] = 'administracion,ti,ventas';
+          $config['dhcrelay']['server'] = '{{ dhcp_relay_server }}';
+          $config['dhcrelay']['agentoption'] = '';
+          write_config("DHCP Relay configurado via Ansible");
+          services_dhcrelay_configure();
 
     # ========================================================================
-    # HIGH AVAILABILITY
+    # HIGH AVAILABILITY SYNC via PHPShell
     # ========================================================================
-    - name: Configurar HA Sync
-      netgate.pfsense.pfsense_hasync:
-        pfsyncenabled: true
-        pfsyncinterface: "servidores"
-        pfsyncpeerip: "{{ ha_sync_peer }}"
-        synchronizetoip: "{{ ha_sync_peer }}"
-        username: "{{ pfsense_username }}"
-        password: "{{ pfsense_password }}"
-        synchronizeauthservers: true
-        synchronizecerts: true
-        synchronizerules: true
-        synchronizenat: true
-        synchronizevirtualip: true
+    - name: Configurar HA Sync (pfsync + XMLRPC)
+      pfsensible.core.pfsense_phpshell:
+        command: |
+          if (!isset($config['hasync'])) {
+              $config['hasync'] = array();
+          }
+          
+          // pfsync
+          $config['hasync']['pfsyncenabled'] = 'on';
+          $config['hasync']['pfsyncinterface'] = 'servidores';
+          $config['hasync']['pfsyncpeerip'] = '{{ ha_sync_peer }}';
+          
+          // XMLRPC Sync
+          $config['hasync']['synchronizetoip'] = '{{ ha_sync_peer }}';
+          $config['hasync']['username'] = '{{ pfsense_username }}';
+          $config['hasync']['password'] = '{{ pfsense_password }}';
+          $config['hasync']['synchronizeauthservers'] = 'on';
+          $config['hasync']['synchronizecerts'] = 'on';
+          $config['hasync']['synchronizerules'] = 'on';
+          $config['hasync']['synchronizeschedules'] = 'on';
+          $config['hasync']['synchronizealiases'] = 'on';
+          $config['hasync']['synchronizenat'] = 'on';
+          $config['hasync']['synchronizeipsec'] = 'on';
+          $config['hasync']['synchronizeopenvpn'] = 'on';
+          $config['hasync']['synchronizedhcpd'] = 'on';
+          $config['hasync']['synchronizewol'] = 'on';
+          $config['hasync']['synchronizestaticroutes'] = 'on';
+          $config['hasync']['synchronizelb'] = 'on';
+          $config['hasync']['synchronizevirtualip'] = 'on';
+          $config['hasync']['synchronizetrafficshaper'] = 'on';
+          $config['hasync']['synchronizetrafficshaperlimiter'] = 'on';
+          $config['hasync']['synchronizednsforwarder'] = 'on';
+          $config['hasync']['synchronizecaptiveportal'] = 'on';
+          
+          write_config("HA Sync configurado via Ansible");
+          interfaces_sync_setup();
+      no_log: true
 
     # ========================================================================
-    # APLICAR CAMBIOS
+    # APLICAR CONFIGURACION
     # ========================================================================
-    - name: Reload configuracion
-      netgate.pfsense.pfsense_reload:
-        filter: true
-        routing: true
+    - name: Aplicar filtros y routing
+      pfsensible.core.pfsense_phpshell:
+        command: |
+          filter_configure();
+          clear_subsystem_dirty('natconf');
+          clear_subsystem_dirty('filter');
 
-    - name: Resumen final
+    # ========================================================================
+    # RESUMEN FINAL
+    # ========================================================================
+    - name: Resumen de configuración
       ansible.builtin.debug:
         msg:
           - "=========================================="
-          - "PFSENSE MASTER CONFIGURADO"
+          - "PFSENSE MASTER CONFIGURADO COMPLETAMENTE"
           - "=========================================="
-          - "Web GUI: https://{{ pfsense_host }}"
           - ""
-          - "Configuracion manual pendiente:"
-          - "1. Gateway Group (System → Routing → Gateway Groups)"
-          - "   - Name: DUAL_WAN_FAILOVER"
-          - "   - WAN1_GW: Tier 1"
-          - "   - WAN2_GW: Tier 1"
+          - "✅ Configurado via módulos nativos:"
+          - "  - Sistema básico"
+          - "  - Alias RFC1918"
+          - "  - Interfaces WAN1, WAN2, VLANs"
+          - "  - Gateways"
+          - "  - NAT Outbound"
+          - "  - Reglas de Firewall"
           - ""
-          - "2. Verificar CARP (Status → CARP)"
+          - "✅ Configurado via PHPShell:"
+          - "  - Gateway Group (Multi-WAN)"
+          - "  - CARP Virtual IPs (4 VIPs)"
+          - "  - NAT Outbound Mode (Hybrid)"
+          - "  - DHCP Relay"
+          - "  - HA Sync (pfsync + XMLRPC)"
+          - ""
+          - "Acceso Web: https://172.17.25.64"
+          - "Usuario: admin / Contraseña: pfsense"
+          - ""
+          - "Verificar:"
+          - "  Status → CARP (debe mostrar MASTER)"
+          - "  Status → Gateways (ambos Online)"
+          - "  System → Routing → Gateway Groups"
           - "=========================================="

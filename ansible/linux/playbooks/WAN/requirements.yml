@@ -2,13 +2,16 @@
 # Colecciones Ansible requeridas para configurar pfSense
 
 collections:
-  # Dependencias requeridas por netgate.pfsense
+  # Dependencias
   - name: ansible.netcommon
     version: ">=5.0.0"
   
   - name: ansible.utils
     version: ">=2.10.0"
   
-  # Colección OFICIAL de Netgate para pfSense
-  - name: netgate.pfsense
-    version: ">=0.4.0"
+  - name: community.general
+    version: ">=7.0.0"
+  
+  # Colección de pfSense (versión más reciente)
+  - name: pfsensible.core
+    version: "0.71"
