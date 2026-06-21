@@ -4,9 +4,16 @@
   become: true
 
   vars:
-    smb_share_name: Compartido
-    smb_share_path: /srv/samba/compartido
-    smb_share_group: Trabajadores
+    smb_shares:
+      - name: CompartidoAdmin
+        path: /srv/samba/admin
+        group: Administracion
+      - name: CompartidoTI
+        path: /srv/samba/ti
+        group: TI
+      - name: CompartidoVentas
+        path: /srv/samba/ventas
+        group: Ventas
     domain: norcom.internal
     domain_upper: NORCOM
     domain_admin: Administrador
@@ -78,23 +85,27 @@
               server min protocol = SMB2
               server max protocol = SMB3
 
-          [{{ smb_share_name }}]
-              path = {{ smb_share_path }}
+          {% for share in smb_shares %}
+          [{{ share.name }}]
+              path = {{ share.path }}
               browseable = yes
               read only = no
               guest ok = no
-              valid users = @"{{ domain_upper }}\{{ smb_share_group }}"
+              valid users = @"{{ domain_upper }}\{{ share.group }}"
               create mask = 0660
               directory mask = 0770
+
+          {% endfor %}
       notify: Restart samba
 
-    - name: Crear carpeta del recurso compartido
+    - name: Crear carpetas de recursos compartidos
       ansible.builtin.file:
-        path: "{{ smb_share_path }}"
+        path: "{{ item.path }}"
         state: directory
         owner: root
         group: root
         mode: "0777"
+      loop: "{{ smb_shares }}"
 
     - name: Validar configuracion de Samba
       ansible.builtin.command: testparm -s

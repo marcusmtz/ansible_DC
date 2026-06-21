@@ -4,25 +4,53 @@
   gather_facts: false
 
   vars:
-    ad_workers:
-      - name: trabajador1
-        firstname: Trabajador
+    ad_groups:
+      - Administracion
+      - TI
+      - Ventas
+
+    ad_users:
+      - name: admin1
+        firstname: Admin
         surname: Uno
-        password: "Trabajo1!"
-      - name: trabajador2
-        firstname: Trabajador
+        password: "Admin1!"
+        group: Administracion
+      - name: admin2
+        firstname: Admin
         surname: Dos
-        password: "Trabajo2!"
+        password: "Admin2!"
+        group: Administracion
+      - name: ti1
+        firstname: TI
+        surname: Uno
+        password: "TI1!"
+        group: TI
+      - name: ti2
+        firstname: TI
+        surname: Dos
+        password: "TI2!"
+        group: TI
+      - name: ventas1
+        firstname: Ventas
+        surname: Uno
+        password: "Ventas1!"
+        group: Ventas
+      - name: ventas2
+        firstname: Ventas
+        surname: Dos
+        password: "Ventas2!"
+        group: Ventas
 
   tasks:
-    - name: Crear grupo de seguridad Trabajadores
+    - name: Crear grupos de seguridad por departamento
       microsoft.ad.group:
-        name: Trabajadores
+        name: "{{ item }}"
         scope: global
         category: security
         state: present
+      loop: "{{ ad_groups }}"
 
-    - name: Crear usuarios trabajadores en AD
+    - name: Crear usuarios por departamento en AD
       microsoft.ad.user:
         name: "{{ item.name }}"
         firstname: "{{ item.firstname }}"
@@ -32,6 +60,6 @@
         enabled: true
         groups:
           add:
-            - Trabajadores
+            - "{{ item.group }}"
         state: present
-      loop: "{{ ad_workers }}"
+      loop: "{{ ad_users }}"

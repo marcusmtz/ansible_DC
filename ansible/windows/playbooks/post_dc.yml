@@ -6,26 +6,37 @@
   vars:
     dhcp_scopes:
       - scope_id: "192.168.20.0"
-        name: "VLAN20-Trabajadores"
-        start_range: "192.168.20.100"
-        end_range: "192.168.20.199"
-        subnet_mask: "255.255.255.0"
+        name: "VLAN20-Administracion"
+        start_range: "192.168.20.50"
+        end_range: "192.168.20.120"
+        subnet_mask: "255.255.255.128"
         router: "192.168.20.1"
         dns_servers: ["192.168.10.5", "192.168.10.6"]
         lease_days: 1
         lease_hours: 0
-        description: "Trabajadores - VLAN 20"
+        description: "Administracion - VLAN 20 - /25 (126 hosts)"
 
       - scope_id: "192.168.30.0"
-        name: "VLAN30-Invitados"
-        start_range: "192.168.30.100"
-        end_range: "192.168.30.199"
-        subnet_mask: "255.255.255.0"
+        name: "VLAN30-TI"
+        start_range: "192.168.30.30"
+        end_range: "192.168.30.60"
+        subnet_mask: "255.255.255.192"
         router: "192.168.30.1"
-        dns_servers: ["8.8.8.8", "1.1.1.1"]
-        lease_days: 0
-        lease_hours: 4
-        description: "Invitados WiFi - VLAN 30"
+        dns_servers: ["192.168.10.5", "192.168.10.6"]
+        lease_days: 1
+        lease_hours: 0
+        description: "TI - VLAN 30 - /26 (62 hosts)"
+
+      - scope_id: "192.168.40.0"
+        name: "VLAN40-Ventas"
+        start_range: "192.168.40.50"
+        end_range: "192.168.40.120"
+        subnet_mask: "255.255.255.128"
+        router: "192.168.40.1"
+        dns_servers: ["192.168.10.5", "192.168.10.6"]
+        lease_days: 1
+        lease_hours: 0
+        description: "Ventas - VLAN 40 - /25 (126 hosts)"
 
   tasks:
     - name: Esperar a WinRM

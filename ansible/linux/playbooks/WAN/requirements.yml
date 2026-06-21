@@ -1,0 +1,7 @@
+---
+# Colecciones Ansible requeridas para configurar pfSense
+
+collections:
+  - name: pfsensible.core
+    version: ">=0.4.0"
+    source: https://galaxy.ansible.com

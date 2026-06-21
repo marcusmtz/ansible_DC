@@ -16,7 +16,30 @@
       - "192.168.13.97"
 
   tasks:
-    - name: Instalar paquetes necesarios
+    # Validación de prerrequisitos
+    - name: Verificar que las interfaces de red existen
+      ansible.builtin.stat:
+        path: "/sys/class/net/{{ item }}"
+      register: interface_check
+      failed_when: not interface_check.stat.exists
+      loop:
+        - "{{ wan_interface }}"
+        - "{{ lan_interface }}"
+      tags:
+        - validation
+        - network
+
+    - name: Verificar que el archivo netplan existe
+      ansible.builtin.stat:
+        path: "{{ netplan_file }}"
+      register: netplan_check
+      failed_when: not netplan_check.stat.exists
+      tags:
+        - validation
+        - netplan
+
+    # Instalación de paquetes
+    - name: Instalar paquetes necesarios para routing y NAT
       ansible.builtin.apt:
         name:
           - iptables
@@ -24,89 +47,193 @@
           - netfilter-persistent
         state: present
         update_cache: true
+        cache_valid_time: 3600
+      tags:
+        - packages
+        - firewall
 
-    - name: Cargar netplan actual
+    # Configuración de red con netplan
+    - name: Leer configuración netplan actual
       ansible.builtin.slurp:
         path: "{{ netplan_file }}"
       register: netplan_raw
+      tags:
+        - netplan
+        - network
 
-    - name: Parsear netplan actual
+    - name: Parsear configuración netplan actual
       ansible.builtin.set_fact:
         netplan_current: "{{ netplan_raw.content | b64decode | from_yaml }}"
+      tags:
+        - netplan
+        - network
 
-    - name: Construir netplan actualizado (LAN + DNS en WAN)
-      ansible.builtin.set_fact:
-        netplan_updated: >-
-          {{
-            netplan_current
-            | combine(
-                {
-                  'network': {
-                    'version': (netplan_current.network.version | default(2)),
-                    'renderer': (netplan_current.network.renderer | default('networkd')),
-                    'ethernets': {
-                      (lan_interface): {
-                        'dhcp4': false,
-                        'addresses': [lan_address]
-                      },
-                      (wan_interface): {
-                        'nameservers': {
-                          'addresses': nameservers
-                        }
-                      }
-                    }
-                  }
-                },
-                recursive=True
-              )
-          }}
-
-    - name: Escribir netplan principal sin tocar la WAN
+    - name: Crear copia de seguridad de netplan antes de modificar
       ansible.builtin.copy:
-        dest: "{{ netplan_file }}"
+        src: "{{ netplan_file }}"
+        dest: "{{ netplan_file }}.backup-{{ ansible_date_time.iso8601_basic_short }}"
+        remote_src: true
+        mode: "0644"
+      tags:
+        - netplan
+        - network
+        - backup
+
+    - name: Configurar interfaz LAN en netplan
+      ansible.builtin.template:
+        dest: /etc/netplan/99-isp2-lan.yaml
         owner: root
         group: root
         mode: "0644"
-        backup: true
-        content: "{{ netplan_updated | to_nice_yaml(indent=2, sort_keys=False) }}"
-      notify: Apply netplan
+        content: |
+          network:
+            version: 2
+            renderer: networkd
+            ethernets:
+              {{ lan_interface }}:
+                dhcp4: false
+                addresses:
+                  - {{ lan_address }}
+      notify: Validar y aplicar netplan
+      tags:
+        - netplan
+        - network
 
-    - name: Activar IPv4 forwarding
+    - name: Agregar nameservers a interfaz WAN en netplan
+      ansible.builtin.template:
+        dest: /etc/netplan/99-isp2-wan-dns.yaml
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          network:
+            version: 2
+            ethernets:
+              {{ wan_interface }}:
+                nameservers:
+                  addresses:
+                    {% for ns in nameservers %}
+                    - {{ ns }}
+                    {% endfor %}
+      notify: Validar y aplicar netplan
+      tags:
+        - netplan
+        - network
+        - dns
+
+    # Configuración de IP forwarding
+    - name: Activar IPv4 forwarding de forma persistente
       ansible.posix.sysctl:
         name: net.ipv4.ip_forward
         value: "1"
         state: present
+        sysctl_file: /etc/sysctl.d/99-router.conf
         reload: true
+      tags:
+        - sysctl
+        - routing
 
-    - name: Agregar regla NAT MASQUERADE
-      ansible.builtin.shell: |
-        iptables -t nat -C POSTROUTING -o {{ wan_interface }} -j MASQUERADE || \
-        iptables -t nat -A POSTROUTING -o {{ wan_interface }} -j MASQUERADE
-      args:
-        executable: /bin/bash
+    # Configuración de firewall con iptables-persistent
+    - name: Crear directorio para reglas iptables si no existe
+      ansible.builtin.file:
+        path: /etc/iptables
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - firewall
+
+    - name: Configurar reglas NAT en iptables
+      ansible.builtin.iptables:
+        table: nat
+        chain: POSTROUTING
+        out_interface: "{{ wan_interface }}"
+        jump: MASQUERADE
+        comment: "NAT para ISP2 LAN"
+      notify: Guardar reglas iptables
+      tags:
+        - firewall
+        - nat
 
     - name: Permitir forwarding de LAN hacia WAN
-      ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT || \
-        iptables -A FORWARD -i {{ lan_interface }} -o {{ wan_interface }} -j ACCEPT
-      args:
-        executable: /bin/bash
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: "{{ lan_interface }}"
+        out_interface: "{{ wan_interface }}"
+        jump: ACCEPT
+        comment: "Permitir trafico LAN a WAN"
+      notify: Guardar reglas iptables
+      tags:
+        - firewall
+        - forwarding
 
-    - name: Permitir trafico de retorno WAN hacia LAN
-      ansible.builtin.shell: |
-        iptables -C FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT || \
-        iptables -A FORWARD -i {{ wan_interface }} -o {{ lan_interface }} -m state --state RELATED,ESTABLISHED -j ACCEPT
-      args:
-        executable: /bin/bash
+    - name: Permitir trafico establecido de WAN hacia LAN
+      ansible.builtin.iptables:
+        chain: FORWARD
+        in_interface: "{{ wan_interface }}"
+        out_interface: "{{ lan_interface }}"
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+        comment: "Permitir respuestas WAN a LAN"
+      notify: Guardar reglas iptables
+      tags:
+        - firewall
+        - forwarding
 
-    - name: Guardar reglas iptables
-      ansible.builtin.shell: netfilter-persistent save
-      args:
-        executable: /bin/bash
+    - name: Establecer politica por defecto DROP en FORWARD
+      ansible.builtin.iptables:
+        chain: FORWARD
+        policy: DROP
+      notify: Guardar reglas iptables
+      tags:
+        - firewall
+        - security
 
   handlers:
-    - name: Apply netplan
-      ansible.builtin.shell: netplan generate && netplan apply
-      args:
-        executable: /bin/bash
+    - name: Validar y aplicar netplan
+      block:
+        - name: Validar sintaxis netplan
+          ansible.builtin.command:
+            cmd: netplan generate
+          register: netplan_generate
+          changed_when: false
+          failed_when: netplan_generate.rc != 0
+
+        - name: Aplicar configuración netplan
+          ansible.builtin.command:
+            cmd: netplan apply
+          async: 45
+          poll: 0
+          register: netplan_apply_result
+
+        - name: Esperar a que la red se estabilice
+          ansible.builtin.wait_for:
+            timeout: 10
+          delegate_to: localhost
+
+        - name: Verificar conectividad después de aplicar netplan
+          ansible.builtin.wait_for_connection:
+            timeout: 30
+      rescue:
+        - name: Restaurar configuración netplan anterior
+          ansible.builtin.copy:
+            src: "{{ netplan_file }}.backup-{{ ansible_date_time.iso8601_basic_short }}"
+            dest: "{{ netplan_file }}"
+            remote_src: true
+          ignore_errors: true
+
+        - name: Aplicar configuración anterior
+          ansible.builtin.command:
+            cmd: netplan apply
+          ignore_errors: true
+
+        - name: Fallar con mensaje informativo
+          ansible.builtin.fail:
+            msg: "Error al aplicar netplan. Se ha intentado restaurar la configuración anterior."
+
+    - name: Guardar reglas iptables
+      ansible.builtin.command:
+        cmd: netfilter-persistent save
+      changed_when: true
 
