@@ -2,6 +2,17 @@
 # Colecciones Ansible requeridas para configurar pfSense
 
 collections:
+  # Dependencias requeridas por pfsensible.core
+  - name: ansible.netcommon
+    version: ">=5.0.0"
+  
+  - name: ansible.utils
+    version: ">=2.10.0"
+  
+  - name: community.general
+    version: ">=7.0.0"
+  
+  # Colección principal de pfSense
   - name: pfsensible.core
     version: ">=0.4.0"
     source: https://galaxy.ansible.com

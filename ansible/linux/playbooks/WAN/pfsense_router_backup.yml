@@ -167,17 +167,21 @@
     # ========================================================================
     # CONFIGURACION DE GATEWAY GROUP (MULTI-WAN)
     # ========================================================================
-    - name: Crear Gateway Group para Load Balancing
-      pfsensible.core.pfsense_gateway_group:
-        name: "DUAL_WAN_FAILOVER"
-        descr: "Dual WAN con failover automatico"
-        trigger: "down"
-        priorities:
-          - gateway: "{{ wan1_gateway_name }}"
-            tier: 1
-          - gateway: "{{ wan2_gateway_name }}"
-            tier: 1
-        state: present
+    # NOTA: El módulo pfsense_gateway_group puede no estar disponible en todas
+    # las versiones de pfsensible.core. Si falla, configurar manualmente:
+    # System → Routing → Gateway Groups → Add
+    
+    # - name: Crear Gateway Group para Load Balancing
+    #   pfsensible.core.pfsense_gateway_group:
+    #     name: "DUAL_WAN_FAILOVER"
+    #     descr: "Dual WAN con failover automatico"
+    #     trigger: "down"
+    #     priorities:
+    #       - gateway: "{{ wan1_gateway_name }}"
+    #         tier: 1
+    #       - gateway: "{{ wan2_gateway_name }}"
+    #         tier: 1
+    #     state: present
 
     # ========================================================================
     # CREAR VLANs
