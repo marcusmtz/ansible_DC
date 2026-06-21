@@ -7,7 +7,7 @@
     wan_interface: ens34
     lan_interface: ens35
     lan_address: "168.17.25.1/29"
-    netplan_file: /etc/netplan/00-installer-config.yaml
+    netplan_file: /etc/netplan/50-cloud-init.yaml
 
     nameservers:
       - "8.8.8.8"
