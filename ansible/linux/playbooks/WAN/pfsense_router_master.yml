@@ -84,9 +84,9 @@
       pfsensible.core.pfsense_setup:
         hostname: "{{ hostname }}"
         domain: "{{ domain }}"
-        timeservers: "pool.ntp.org"
         timezone: "{{ timezone }}"
-        dnsserver: "{{ dns_servers }}"
+        timeservers: "pool.ntp.org"
+        dns_addresses: "{{ dns_servers | join(' ') }}"
 
     # ========================================================================
     # ALIAS RFC1918
@@ -109,9 +109,13 @@
       pfsensible.core.pfsense_interface:
         descr: "WAN"
         interface: "{{ wan1_interface }}"
-        ipaddr: "{{ wan1_address }}"
-        subnet: "{{ wan1_subnet }}"
-        enable: yes
+        ipv4_type: "static"
+        ipv4_address: "{{ wan1_address }}"
+        ipv4_prefixlen: "{{ wan1_subnet }}"
+        ipv4_gateway: "{{ wan1_gateway_name }}"
+        enable: true
+        blockbogons: false
+        blockpriv: false
 
     - name: Gateway WAN1
       pfsensible.core.pfsense_gateway:
@@ -119,17 +123,21 @@
         interface: "wan"
         gateway: "{{ wan1_gateway }}"
         ipprotocol: "inet"
-        monitor_disable: no
         descr: "Gateway ISP Principal"
+        monitor_disable: false
         state: present
 
     - name: Configurar WAN2 (OPT1)
       pfsensible.core.pfsense_interface:
         descr: "WAN2"
         interface: "{{ wan2_interface }}"
-        ipaddr: "{{ wan2_address }}"
-        subnet: "{{ wan2_subnet }}"
-        enable: yes
+        ipv4_type: "static"
+        ipv4_address: "{{ wan2_address }}"
+        ipv4_prefixlen: "{{ wan2_subnet }}"
+        ipv4_gateway: "{{ wan2_gateway_name }}"
+        enable: true
+        blockbogons: false
+        blockpriv: false
 
     - name: Gateway WAN2
       pfsensible.core.pfsense_gateway:
@@ -137,8 +145,8 @@
         interface: "opt1"
         gateway: "{{ wan2_gateway }}"
         ipprotocol: "inet"
-        monitor_disable: no
         descr: "Gateway ISP Secundario"
+        monitor_disable: false
         state: present
 
     # ========================================================================
@@ -186,9 +194,10 @@
       pfsensible.core.pfsense_interface:
         descr: "{{ item.name }}"
         interface: "{{ trunk_interface }}.{{ item.vlan_id }}"
-        ipaddr: "{{ item.ipaddr }}"
-        subnet: "{{ item.subnet }}"
-        enable: yes
+        ipv4_type: "static"
+        ipv4_address: "{{ item.ipaddr }}"
+        ipv4_prefixlen: "{{ item.subnet }}"
+        enable: true
       loop: "{{ vlans }}"
 
     # ========================================================================
@@ -247,17 +256,19 @@
     # ========================================================================
     - name: NAT VLANs hacia WAN1
       pfsensible.core.pfsense_nat_outbound:
+        descr: "NAT {{ item.name }} via WAN1"
         interface: "wan"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
-        descr: "NAT {{ item.name }} via WAN1"
+        destination: "any"
         state: present
       loop: "{{ vlans }}"
 
     - name: NAT VLANs hacia WAN2
       pfsensible.core.pfsense_nat_outbound:
+        descr: "NAT {{ item.name }} via WAN2"
         interface: "opt1"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
-        descr: "NAT {{ item.name }} via WAN2"
+        destination: "any"
         state: present
       loop: "{{ vlans }}"
 
