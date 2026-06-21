@@ -1,5 +1,5 @@
 ---
-- name: Configurar pfSense Router MASTER con CARP y VLANs usando pfsensible.core
+- name: Configurar pfSense Router MASTER usando netgate.pfsense
   hosts: pfsense_router_master
   gather_facts: false
   
@@ -7,42 +7,38 @@
     # === Credenciales pfSense ===
     pfsense_host: "172.17.25.64"
     pfsense_username: "admin"
-    pfsense_password: "pfsense"  # Cambiar despues de configuracion inicial
+    pfsense_password: "pfsense"
     
     # === Interfaces WAN ===
-    wan1_interface: "vmx0"  # ISP Principal (VMware VMXNET3)
+    wan1_interface: "vmx0"
     wan1_address: "172.17.25.64"
     wan1_subnet: "24"
     wan1_gateway: "172.17.25.121"
     wan1_gateway_name: "WAN1_GW"
-    wan1_gateway_descr: "Gateway ISP Principal"
     
-    wan2_interface: "vmx2"  # ISP Secundario (VMware VMXNET3)
+    wan2_interface: "vmx2"
     wan2_address: "168.17.25.2"
     wan2_subnet: "29"
     wan2_gateway: "168.17.25.1"
     wan2_gateway_name: "WAN2_GW"
-    wan2_gateway_descr: "Gateway ISP Secundario"
     
-    # === Interfaz LAN Trunk (VLANs) ===
-    trunk_interface: "vmx1"  # LAN Trunk 802.1Q (VMware VMXNET3)
+    # === LAN Trunk ===
+    trunk_interface: "vmx1"
     
-    # === VLANs con VLSM ===
+    # === VLANs ===
     vlans:
       - vlan_id: 10
         name: "SERVIDORES"
         descr: "VLAN 10 - Servidores"
-        parent_interface: "{{ trunk_interface }}"
         ipaddr: "192.168.10.2"
         subnet: "26"
         vip: "192.168.10.1"
         vhid: 10
-        advskew: 0  # Master = 0
+        advskew: 0
         
       - vlan_id: 20
         name: "ADMINISTRACION"
         descr: "VLAN 20 - Administracion"
-        parent_interface: "{{ trunk_interface }}"
         ipaddr: "192.168.20.2"
         subnet: "25"
         vip: "192.168.20.1"
@@ -52,7 +48,6 @@
       - vlan_id: 30
         name: "TI"
         descr: "VLAN 30 - TI"
-        parent_interface: "{{ trunk_interface }}"
         ipaddr: "192.168.30.2"
         subnet: "26"
         vip: "192.168.30.1"
@@ -62,397 +57,272 @@
       - vlan_id: 40
         name: "VENTAS"
         descr: "VLAN 40 - Ventas"
-        parent_interface: "{{ trunk_interface }}"
         ipaddr: "192.168.40.2"
         subnet: "25"
         vip: "192.168.40.1"
         vhid: 40
         advskew: 0
     
-    # === CARP ===
+    # === HA ===
     carp_password: "CARP_PASS_2024"
-    
-    # === DHCP Relay ===
     dhcp_relay_server: "192.168.10.5"
-    
-    # === DNS ===
-    dns_servers:
-      - "192.168.10.5"
-      - "192.168.10.6"
-      - "8.8.8.8"
-      - "1.1.1.1"
+    ha_sync_peer: "192.168.10.3"
     
     # === Sistema ===
     hostname: "pfsense-master"
     domain: "norcom.internal"
     timezone: "America/Lima"
-    
-    # === Sincronizacion HA ===
-    ha_sync_peer: "192.168.10.3"  # IP del Backup
-    ha_sync_username: "admin"
-    ha_sync_password: "{{ pfsense_password }}"
+    dns_servers:
+      - "192.168.10.5"
+      - "192.168.10.6"
+      - "8.8.8.8"
 
   tasks:
     # ========================================================================
-    # CONFIGURACION BASICA DEL SISTEMA
+    # CONFIGURACION BASICA
     # ========================================================================
-    - name: Configurar hostname y dominio
-      pfsensible.core.pfsense_setup:
+    - name: Configurar sistema básico
+      netgate.pfsense.pfsense_setup:
         hostname: "{{ hostname }}"
         domain: "{{ domain }}"
         timezone: "{{ timezone }}"
         dnsserver: "{{ dns_servers }}"
 
     # ========================================================================
-    # CREAR ALIAS RFC1918 (Redes Privadas)
+    # ALIAS RFC1918
     # ========================================================================
-    - name: Crear alias RFC1918 para redes privadas
-      pfsensible.core.pfsense_alias:
-        name: "RFC1918"
-        type: "network"
-        descr: "Redes privadas RFC1918"
-        address:
-          - "10.0.0.0/8"
-          - "172.16.0.0/12"
-          - "192.168.0.0/16"
-        state: present
+    - name: Crear alias RFC1918
+      netgate.pfsense.pfsense_aggregate:
+        aggregated_config:
+          aliases:
+            - name: "RFC1918"
+              type: "network"
+              descr: "Redes privadas RFC1918"
+              address:
+                - "10.0.0.0/8"
+                - "172.16.0.0/12"
+                - "192.168.0.0/16"
 
     # ========================================================================
-    # CONFIGURACION DE INTERFACES WAN
+    # INTERFACES WAN
     # ========================================================================
-    # ADVERTENCIA: Cambiar WAN de DHCP a IP estatica puede causar perdida
-    # temporal de conectividad. Asegurate de tener acceso por otra interfaz
-    # (LAN/Consola) antes de ejecutar en produccion.
-    
-    - name: Configurar interfaz WAN1
-      pfsensible.core.pfsense_interface:
+    - name: Configurar WAN1
+      netgate.pfsense.pfsense_interface:
         descr: "WAN"
         interface: "{{ wan1_interface }}"
         ipaddr: "{{ wan1_address }}"
         subnet: "{{ wan1_subnet }}"
+        gateway: "{{ wan1_gateway_name }}"
         enable: true
-        blockpriv: false
-        blockbogons: false
 
     - name: Configurar gateway WAN1
-      pfsensible.core.pfsense_gateway:
+      netgate.pfsense.pfsense_gateway:
         name: "{{ wan1_gateway_name }}"
         interface: "wan"
-        ipprotocol: "inet"
         gateway: "{{ wan1_gateway }}"
-        descr: "{{ wan1_gateway_descr }}"
         monitor_disable: false
-        weight: 1
-        state: present
 
-    - name: Configurar interfaz WAN2
-      pfsensible.core.pfsense_interface:
+    - name: Configurar WAN2 (OPT1)
+      netgate.pfsense.pfsense_interface:
         descr: "WAN2"
         interface: "{{ wan2_interface }}"
         ipaddr: "{{ wan2_address }}"
         subnet: "{{ wan2_subnet }}"
+        gateway: "{{ wan2_gateway_name }}"
         enable: true
-        blockpriv: false
-        blockbogons: false
 
     - name: Configurar gateway WAN2
-      pfsensible.core.pfsense_gateway:
+      netgate.pfsense.pfsense_gateway:
         name: "{{ wan2_gateway_name }}"
-        interface: "opt1"  # OPT1 corresponde a vmx2 en pfSense
-        ipprotocol: "inet"
+        interface: "opt1"
         gateway: "{{ wan2_gateway }}"
-        descr: "{{ wan2_gateway_descr }}"
         monitor_disable: false
-        weight: 1
-        state: present
 
     # ========================================================================
-    # CONFIGURACION DE GATEWAY GROUP (MULTI-WAN)
+    # VLAN CONFIGURATION
     # ========================================================================
-    # NOTA: El módulo pfsense_gateway_group puede no estar disponible en todas
-    # las versiones de pfsensible.core. Si falla, configurar manualmente:
-    # System → Routing → Gateway Groups → Add
-    
-    # - name: Crear Gateway Group para Load Balancing
-    #   pfsensible.core.pfsense_gateway_group:
-    #     name: "DUAL_WAN_FAILOVER"
-    #     descr: "Dual WAN con failover automatico"
-    #     trigger: "down"
-    #     priorities:
-    #       - gateway: "{{ wan1_gateway_name }}"
-    #         tier: 1
-    #       - gateway: "{{ wan2_gateway_name }}"
-    #         tier: 1
-    #     state: present
-  #Accede a https://172.17.25.64
-    #Ve a System → Routing → Gateway Groups
-    #Click en Add
-    #Configura:
-    #Group Name: DUAL_WAN_FAILOVER
-    #Gateway Priority:
-    #WAN1_GW: Tier 1
-    #WAN2_GW: Tier 1
-    #Trigger Level: Member Down
-    #Save
+    - name: Configurar VLANs y CARP usando aggregate
+      netgate.pfsense.pfsense_aggregate:
+        aggregated_config:
+          vlans:
+            - vlan_id: 10
+              interface: "{{ trunk_interface }}"
+              descr: "VLAN 10 - Servidores"
+            - vlan_id: 20
+              interface: "{{ trunk_interface }}"
+              descr: "VLAN 20 - Administracion"
+            - vlan_id: 30
+              interface: "{{ trunk_interface }}"
+              descr: "VLAN 30 - TI"
+            - vlan_id: 40
+              interface: "{{ trunk_interface }}"
+              descr: "VLAN 40 - Ventas"
 
-    # ========================================================================
-    # CREAR VLANs
-    # ========================================================================
-    - name: Crear VLANs en interfaz trunk
-      pfsensible.core.pfsense_vlan:
-        interface: "{{ item.parent_interface }}"
-        vlan_id: "{{ item.vlan_id }}"
-        descr: "{{ item.descr }}"
-        priority: 0
-        state: present
-      loop: "{{ vlans }}"
-      loop_control:
-        label: "VLAN {{ item.vlan_id }} - {{ item.name }}"
-
-    # ========================================================================
-    # ASIGNAR VLANs COMO INTERFACES
-    # ========================================================================
-    - name: Asignar y configurar interfaces VLAN
-      pfsensible.core.pfsense_interface:
+    - name: Configurar interfaces VLAN
+      netgate.pfsense.pfsense_interface:
         descr: "{{ item.name }}"
-        interface: "{{ item.parent_interface }}.{{ item.vlan_id }}"
+        interface: "{{ trunk_interface }}.{{ item.vlan_id }}"
         ipaddr: "{{ item.ipaddr }}"
         subnet: "{{ item.subnet }}"
         enable: true
       loop: "{{ vlans }}"
-      loop_control:
-        label: "Interface {{ item.name }}"
 
     # ========================================================================
-    # CONFIGURAR CARP (Virtual IPs)
+    # CARP VIRTUAL IPs
     # ========================================================================
-    # NOTA: El módulo pfsense_virtual_ip no está disponible en todas las versiones
-    # de pfsensible.core. Configurar manualmente en:
-    # Firewall → Virtual IPs → Add
-    # - Type: CARP
-    # - Interface: [nombre_vlan]
-    # - Address: [vip]/[subnet]
-    # - VHID: [vhid]
-    # - Advertising Frequency: Base 1, Skew [advskew]
-    # - Password: CARP_PASS_2024
-    
-    # - name: Configurar CARP Virtual IPs
-    #   pfsensible.core.pfsense_virtual_ip:
-    #     interface: "{{ item.name | lower }}"
-    #     type: "carp"
-    #     address: "{{ item.vip }}"
-    #     subnet: "{{ item.subnet }}"
-    #     vhid: "{{ item.vhid }}"
-    #     advskew: "{{ item.advskew }}"
-    #     advbase: 1
-    #     password: "{{ carp_password }}"
-    #     descr: "VIP {{ item.name }}"
-    #     state: present
-    #   loop: "{{ vlans }}"
-    #   loop_control:
-    #     label: "CARP VIP {{ item.vip }}"
-    #   no_log: true  # Ocultar password en logs
+    - name: Configurar CARP VIPs
+      netgate.pfsense.pfsense_virtual_ip:
+        interface: "{{ item.name | lower }}"
+        mode: "carp"
+        vhid: "{{ item.vhid }}"
+        advskew: "{{ item.advskew }}"
+        advbase: 1
+        password: "{{ carp_password }}"
+        address: "{{ item.vip }}"
+        subnet_bits: "{{ item.subnet }}"
+        descr: "VIP {{ item.name }}"
+      loop: "{{ vlans }}"
+      no_log: true
 
     # ========================================================================
-    # CONFIGURAR NAT OUTBOUND
+    # NAT OUTBOUND
     # ========================================================================
-    # NOTA: El módulo pfsense_nat_outbound_mode no está disponible.
-    # Configurar manualmente en: Firewall → NAT → Outbound
-    # - Mode: Hybrid Outbound NAT
-    
-    # - name: Habilitar modo Hybrid Outbound NAT
-    #   pfsensible.core.pfsense_nat_outbound_mode:
-    #     mode: "hybrid"
+    - name: Configurar modo NAT Outbound
+      netgate.pfsense.pfsense_outbound_nat:
+        mode: "hybrid"
 
-    - name: Configurar NAT para VLANs hacia WAN1
-      pfsensible.core.pfsense_nat_outbound:
+    - name: Reglas NAT hacia WAN1
+      netgate.pfsense.pfsense_outbound_nat_rule:
         interface: "wan"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
         descr: "NAT {{ item.name }} via WAN1"
-        target: ""
-        natport: ""
-        staticnatport: false
-        state: present
+        nat_address: "interface_address"
       loop: "{{ vlans }}"
-      loop_control:
-        label: "NAT {{ item.name }} → WAN1"
 
-    - name: Configurar NAT para VLANs hacia WAN2
-      pfsensible.core.pfsense_nat_outbound:
-        interface: "opt1"  # OPT1 = vmx2 (WAN2)
+    - name: Reglas NAT hacia WAN2
+      netgate.pfsense.pfsense_outbound_nat_rule:
+        interface: "opt1"
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
         descr: "NAT {{ item.name }} via WAN2"
-        target: ""
-        natport: ""
-        staticnatport: false
-        state: present
+        nat_address: "interface_address"
       loop: "{{ vlans }}"
-      loop_control:
-        label: "NAT {{ item.name }} → WAN2"
 
     # ========================================================================
-    # REGLAS DE FIREWALL INTER-VLAN
+    # FIREWALL RULES
     # ========================================================================
-    # IMPORTANTE: Orden de reglas = First-Match-Wins (pfSense)
-    # Las reglas de BLOQUEO deben ir ANTES que las de PERMISO
-    
-    # --- VLAN 20 (Administracion) - Acceso completo ---
-    - name: VLAN20 Administracion - Permitir TODO
-      pfsensible.core.pfsense_rule:
+    - name: VLAN20 - Administracion permite todo
+      netgate.pfsense.pfsense_rule:
         name: "ADMIN_ALLOW_ALL"
         interface: "administracion"
         source: "administracion:network"
         destination: "any"
-        protocol: "any"
         action: "pass"
-        descr: "Administracion tiene acceso completo"
-        state: present
+        descr: "Administracion acceso completo"
 
-    # --- VLAN 30 (TI) - Acceso completo ---
-    - name: VLAN30 TI - Permitir TODO
-      pfsensible.core.pfsense_rule:
+    - name: VLAN30 - TI permite todo
+      netgate.pfsense.pfsense_rule:
         name: "TI_ALLOW_ALL"
         interface: "ti"
         source: "ti:network"
         destination: "any"
-        protocol: "any"
         action: "pass"
-        descr: "TI tiene acceso completo"
-        state: present
+        descr: "TI acceso completo"
 
-    # --- VLAN 40 (Ventas) - Primero BLOQUEAR, luego PERMITIR ---
-    
-    # BLOQUEOS EXPLICITOS (van primero)
-    - name: VLAN40 Ventas - Bloquear hacia Administracion
-      pfsensible.core.pfsense_rule:
+    - name: VLAN40 - Bloquear Admin
+      netgate.pfsense.pfsense_rule:
         name: "VENTAS_BLOCK_ADMIN"
         interface: "ventas"
         source: "ventas:network"
         destination: "administracion:network"
-        protocol: "any"
         action: "block"
-        descr: "Ventas bloqueado hacia Administracion"
-        state: present
+        descr: "Ventas bloqueado a Admin"
 
-    - name: VLAN40 Ventas - Bloquear hacia TI
-      pfsensible.core.pfsense_rule:
+    - name: VLAN40 - Bloquear TI
+      netgate.pfsense.pfsense_rule:
         name: "VENTAS_BLOCK_TI"
         interface: "ventas"
         source: "ventas:network"
         destination: "ti:network"
-        protocol: "any"
         action: "block"
-        descr: "Ventas bloqueado hacia TI"
-        state: present
+        descr: "Ventas bloqueado a TI"
 
-    # PERMISOS (van despues de los bloqueos)
-    - name: VLAN40 Ventas - Permitir acceso a Servidores
-      pfsensible.core.pfsense_rule:
+    - name: VLAN40 - Permitir Servidores
+      netgate.pfsense.pfsense_rule:
         name: "VENTAS_TO_SERVIDORES"
         interface: "ventas"
         source: "ventas:network"
         destination: "servidores:network"
-        protocol: "any"
         action: "pass"
-        descr: "Ventas puede acceder a Servidores"
-        state: present
+        descr: "Ventas a Servidores"
 
-    - name: VLAN40 Ventas - Permitir Internet
-      pfsensible.core.pfsense_rule:
+    - name: VLAN40 - Permitir Internet
+      netgate.pfsense.pfsense_rule:
         name: "VENTAS_TO_INTERNET"
         interface: "ventas"
         source: "ventas:network"
-        destination: "!RFC1918"  # Todo excepto redes privadas (usa alias creado arriba)
-        protocol: "any"
+        destination: "!RFC1918"
         action: "pass"
-        descr: "Ventas puede acceder a Internet"
-        state: present
+        descr: "Ventas a Internet"
 
-    # --- VLAN 10 (Servidores) - Solo respuestas ---
-    - name: VLAN10 Servidores - Permitir respuestas establecidas
-      pfsensible.core.pfsense_rule:
+    - name: VLAN10 - Servidores respuestas
+      netgate.pfsense.pfsense_rule:
         name: "SERVIDORES_ESTABLISHED"
         interface: "servidores"
         source: "servidores:network"
         destination: "any"
-        protocol: "any"
-        statetype: "keep state"
         action: "pass"
-        descr: "Servidores responden trafico establecido"
-        state: present
+        statetype: "keep state"
+        descr: "Servidores respuestas establecidas"
 
     # ========================================================================
     # DHCP RELAY
     # ========================================================================
     - name: Configurar DHCP Relay
-      pfsensible.core.pfsense_dhcp_relay:
+      netgate.pfsense.pfsense_dhcp_relay:
         interface:
           - "administracion"
           - "ti"
           - "ventas"
         server: "{{ dhcp_relay_server }}"
-        agentoption: false
-        state: present
 
     # ========================================================================
-    # ALTA DISPONIBILIDAD (HA SYNC)
+    # HIGH AVAILABILITY
     # ========================================================================
-    - name: Configurar sincronizacion de estado (pfsync)
-      pfsensible.core.pfsense_hasync:
+    - name: Configurar HA Sync
+      netgate.pfsense.pfsense_hasync:
         pfsyncenabled: true
         pfsyncinterface: "servidores"
         pfsyncpeerip: "{{ ha_sync_peer }}"
-
-    - name: Configurar sincronizacion de configuracion (XMLRPC)
-      pfsensible.core.pfsense_hasync:
         synchronizetoip: "{{ ha_sync_peer }}"
-        username: "{{ ha_sync_username }}"
-        password: "{{ ha_sync_password }}"
+        username: "{{ pfsense_username }}"
+        password: "{{ pfsense_password }}"
         synchronizeauthservers: true
         synchronizecerts: true
         synchronizerules: true
-        synchronizeschedules: true
-        synchronizealiases: true
         synchronizenat: true
-        synchronizeipsec: true
-        synchronizeopenvpn: true
-        synchronizedhcpd: true
-        synchronizewol: true
-        synchronizestaticroutes: true
-        synchronizelb: true
         synchronizevirtualip: true
-        synchronizetrafficshaper: true
-        synchronizetrafficshaperlimiter: true
-        synchronizednsforwarder: true
-        synchronizecaptiveportal: true
 
     # ========================================================================
-    # GUARDAR CONFIGURACION Y APLICAR CAMBIOS
+    # APLICAR CAMBIOS
     # ========================================================================
-    - name: Aplicar todos los cambios de configuracion
-      pfsensible.core.pfsense_reload:
+    - name: Reload configuracion
+      netgate.pfsense.pfsense_reload:
         filter: true
         routing: true
 
-    - name: Mensaje de finalizacion
+    - name: Resumen final
       ansible.builtin.debug:
         msg:
-          - "=========================================================="
-          - "CONFIGURACION PFSENSE MASTER COMPLETADA"
-          - "=========================================================="
+          - "=========================================="
+          - "PFSENSE MASTER CONFIGURADO"
+          - "=========================================="
+          - "Web GUI: https://{{ pfsense_host }}"
           - ""
-          - "Acceso Web: https://{{ pfsense_host }}"
-          - "Usuario: {{ pfsense_username }}"
+          - "Configuracion manual pendiente:"
+          - "1. Gateway Group (System → Routing → Gateway Groups)"
+          - "   - Name: DUAL_WAN_FAILOVER"
+          - "   - WAN1_GW: Tier 1"
+          - "   - WAN2_GW: Tier 1"
           - ""
-          - "Verificar:"
-          - "  - Status → Interfaces"
-          - "  - Status → CARP (failover)"
-          - "  - Status → Gateways"
-          - "  - Firewall → Virtual IPs"
-          - ""
-          - "Proximos pasos:"
-          - "  1. Configurar pfSense Backup"
-          - "  2. Verificar sincronizacion CARP"
-          - "  3. Probar failover"
-          - ""
-          - "=========================================================="
+          - "2. Verificar CARP (Status → CARP)"
+          - "=========================================="
