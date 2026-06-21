@@ -5,19 +5,19 @@
   
   vars:
     # === Credenciales pfSense ===
-    pfsense_host: "172.17.25.90"
+    pfsense_host: "172.17.25.64"
     pfsense_username: "admin"
     pfsense_password: "pfsense"  # Cambiar despues de configuracion inicial
     
     # === Interfaces WAN ===
-    wan1_interface: "igb0"  # Ajustar segun hardware
-    wan1_address: "172.17.25.90"
+    wan1_interface: "vmx0"  # ISP Principal (VMware VMXNET3)
+    wan1_address: "172.17.25.64"
     wan1_subnet: "24"
     wan1_gateway: "172.17.25.121"
     wan1_gateway_name: "WAN1_GW"
     wan1_gateway_descr: "Gateway ISP Principal"
     
-    wan2_interface: "igb1"  # Ajustar segun hardware  
+    wan2_interface: "vmx2"  # ISP Secundario (VMware VMXNET3)
     wan2_address: "168.17.25.2"
     wan2_subnet: "29"
     wan2_gateway: "168.17.25.1"
@@ -25,7 +25,7 @@
     wan2_gateway_descr: "Gateway ISP Secundario"
     
     # === Interfaz LAN Trunk (VLANs) ===
-    trunk_interface: "igb2"  # Ajustar segun hardware
+    trunk_interface: "vmx1"  # LAN Trunk 802.1Q (VMware VMXNET3)
     
     # === VLANs con VLSM ===
     vlans:
@@ -104,8 +104,26 @@
         dnsserver: "{{ dns_servers }}"
 
     # ========================================================================
+    # CREAR ALIAS RFC1918 (Redes Privadas)
+    # ========================================================================
+    - name: Crear alias RFC1918 para redes privadas
+      pfsensible.core.pfsense_alias:
+        name: "RFC1918"
+        type: "network"
+        descr: "Redes privadas RFC1918"
+        address:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+        state: present
+
+    # ========================================================================
     # CONFIGURACION DE INTERFACES WAN
     # ========================================================================
+    # ADVERTENCIA: Cambiar WAN de DHCP a IP estatica puede causar perdida
+    # temporal de conectividad. Asegurate de tener acceso por otra interfaz
+    # (LAN/Consola) antes de ejecutar en produccion.
+    
     - name: Configurar interfaz WAN1
       pfsensible.core.pfsense_interface:
         descr: "WAN"
@@ -140,7 +158,7 @@
     - name: Configurar gateway WAN2
       pfsensible.core.pfsense_gateway:
         name: "{{ wan2_gateway_name }}"
-        interface: "wan2"
+        interface: "opt1"  # OPT1 corresponde a vmx2 en pfSense
         ipprotocol: "inet"
         gateway: "{{ wan2_gateway }}"
         descr: "{{ wan2_gateway_descr }}"
@@ -233,7 +251,7 @@
 
     - name: Configurar NAT para VLANs hacia WAN2
       pfsensible.core.pfsense_nat_outbound:
-        interface: "wan2"
+        interface: "opt1"  # OPT1 = vmx2 (WAN2)
         source: "{{ item.ipaddr }}/{{ item.subnet }}"
         descr: "NAT {{ item.name }} via WAN2"
         target: ""
@@ -247,6 +265,8 @@
     # ========================================================================
     # REGLAS DE FIREWALL INTER-VLAN
     # ========================================================================
+    # IMPORTANTE: Orden de reglas = First-Match-Wins (pfSense)
+    # Las reglas de BLOQUEO deben ir ANTES que las de PERMISO
     
     # --- VLAN 20 (Administracion) - Acceso completo ---
     - name: VLAN20 Administracion - Permitir TODO
@@ -272,29 +292,9 @@
         descr: "TI tiene acceso completo"
         state: present
 
-    # --- VLAN 40 (Ventas) - Solo servidores e Internet ---
-    - name: VLAN40 Ventas - Permitir acceso a Servidores
-      pfsensible.core.pfsense_rule:
-        name: "VENTAS_TO_SERVIDORES"
-        interface: "ventas"
-        source: "ventas:network"
-        destination: "servidores:network"
-        protocol: "any"
-        action: "pass"
-        descr: "Ventas puede acceder a Servidores"
-        state: present
-
-    - name: VLAN40 Ventas - Permitir Internet
-      pfsensible.core.pfsense_rule:
-        name: "VENTAS_TO_INTERNET"
-        interface: "ventas"
-        source: "ventas:network"
-        destination: "!RFC1918"  # Todo excepto redes privadas
-        protocol: "any"
-        action: "pass"
-        descr: "Ventas puede acceder a Internet"
-        state: present
-
+    # --- VLAN 40 (Ventas) - Primero BLOQUEAR, luego PERMITIR ---
+    
+    # BLOQUEOS EXPLICITOS (van primero)
     - name: VLAN40 Ventas - Bloquear hacia Administracion
       pfsensible.core.pfsense_rule:
         name: "VENTAS_BLOCK_ADMIN"
@@ -315,6 +315,29 @@
         protocol: "any"
         action: "block"
         descr: "Ventas bloqueado hacia TI"
+        state: present
+
+    # PERMISOS (van despues de los bloqueos)
+    - name: VLAN40 Ventas - Permitir acceso a Servidores
+      pfsensible.core.pfsense_rule:
+        name: "VENTAS_TO_SERVIDORES"
+        interface: "ventas"
+        source: "ventas:network"
+        destination: "servidores:network"
+        protocol: "any"
+        action: "pass"
+        descr: "Ventas puede acceder a Servidores"
+        state: present
+
+    - name: VLAN40 Ventas - Permitir Internet
+      pfsensible.core.pfsense_rule:
+        name: "VENTAS_TO_INTERNET"
+        interface: "ventas"
+        source: "ventas:network"
+        destination: "!RFC1918"  # Todo excepto redes privadas (usa alias creado arriba)
+        protocol: "any"
+        action: "pass"
+        descr: "Ventas puede acceder a Internet"
         state: present
 
     # --- VLAN 10 (Servidores) - Solo respuestas ---
