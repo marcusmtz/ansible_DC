@@ -81,6 +81,23 @@
         - network
         - backup
 
+    - name: Generar contenido DNS para netplan
+      ansible.builtin.set_fact:
+        dns_config: |
+          network:
+            version: 2
+            ethernets:
+              {{ wan_interface }}:
+                nameservers:
+                  addresses:
+          {% for ns in nameservers %}
+                    - {{ ns }}
+          {% endfor %}
+      tags:
+        - netplan
+        - network
+        - dns
+
     - name: Configurar interfaz LAN en netplan
       ansible.builtin.copy:
         dest: /etc/netplan/99-isp2-lan.yaml
@@ -107,16 +124,7 @@
         owner: root
         group: root
         mode: "0644"
-        content: |
-          network:
-            version: 2
-            ethernets:
-              {{ wan_interface }}:
-                nameservers:
-                  addresses:
-                    {% for ns in nameservers %}
-                    - {{ ns }}
-                    {% endfor %}
+        content: "{{ dns_config }}"
       notify: Validar y aplicar netplan
       tags:
         - netplan
