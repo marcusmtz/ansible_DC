@@ -1,0 +1,356 @@
+---
+- name: Permitir acceso a Internet desde VLAN Servidores - MASTER
+  hosts: pfsense_router_master
+  gather_facts: false
+  connection: local
+
+  vars:
+    pfsense_host: "172.17.25.64"
+    pfsense_username: "admin"
+    pfsense_password: "pfsense"
+
+  tasks:
+    # ========================================================================
+    # REGLA DE FIREWALL: SERVIDORES → INTERNET
+    # ========================================================================
+    - name: Crear regla para permitir Internet desde VLAN Servidores
+      pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
+        command: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          require_once("/etc/inc/filter.inc");
+          
+          global $config;
+          init_config_arr(array('filter', 'rule'));
+          $a_filter = &$config['filter']['rule'];
+          
+          // Función para verificar si regla existe
+          function rule_exists($rules, $descr) {
+              foreach ($rules as $rule) {
+                  if (isset($rule['descr']) && $rule['descr'] == $descr) {
+                      return true;
+                  }
+              }
+              return false;
+          }
+          
+          // Regla: VLAN 10 Servidores - Permitir Internet
+          if (!rule_exists($a_filter, 'Servidores - Allow Internet')) {
+              $rule = array(
+                  'type' => 'pass',
+                  'interface' => 'servidores',
+                  'ipprotocol' => 'inet',
+                  'protocol' => 'any',
+                  'source' => array('network' => 'servidores'),
+                  'destination' => array('any' => true),
+                  'descr' => 'Servidores - Allow Internet'
+              );
+              $a_filter[] = $rule;
+              write_config("Regla Internet para Servidores agregada via Ansible");
+              filter_configure();
+              clear_subsystem_dirty('filter');
+              echo "CREATED";
+          } else {
+              echo "EXISTS";
+          }
+      register: firewall_result
+      changed_when: "'CREATED' in firewall_result.stdout"
+
+    # ========================================================================
+    # VERIFICAR REGLAS NAT OUTBOUND
+    # ========================================================================
+    - name: Verificar NAT Outbound para VLAN Servidores
+      pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
+        command: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          
+          global $config;
+          init_config_arr(array('nat', 'outbound', 'rule'));
+          $a_nat = &$config['nat']['outbound']['rule'];
+          
+          $found_wan1 = false;
+          $found_wan2 = false;
+          
+          foreach ($a_nat as $rule) {
+              if (isset($rule['descr'])) {
+                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'wan') {
+                      $found_wan1 = true;
+                  }
+                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'opt1') {
+                      $found_wan2 = true;
+                  }
+              }
+          }
+          
+          if (!$found_wan1 || !$found_wan2) {
+              // Agregar reglas NAT faltantes
+              if (!$found_wan1) {
+                  $nat_wan1 = array(
+                      'interface' => 'wan',
+                      'source' => array('network' => '192.168.10.0/26'),
+                      'destination' => array('any' => true),
+                      'descr' => 'NAT SERVIDORES via WAN1',
+                      'target' => '',
+                      'natport' => '',
+                      'staticnatport' => false,
+                      'disabled' => false
+                  );
+                  $a_nat[] = $nat_wan1;
+              }
+              
+              if (!$found_wan2) {
+                  $nat_wan2 = array(
+                      'interface' => 'opt1',
+                      'source' => array('network' => '192.168.10.0/26'),
+                      'destination' => array('any' => true),
+                      'descr' => 'NAT SERVIDORES via WAN2',
+                      'target' => '',
+                      'natport' => '',
+                      'staticnatport' => false,
+                      'disabled' => false
+                  );
+                  $a_nat[] = $nat_wan2;
+              }
+              
+              write_config("Reglas NAT Outbound para Servidores agregadas via Ansible");
+              filter_configure();
+              clear_subsystem_dirty('natconf');
+              echo "CREATED";
+          } else {
+              echo "EXISTS";
+          }
+      register: nat_result
+      changed_when: "'CREATED' in nat_result.stdout"
+
+    # ========================================================================
+    # APLICAR CAMBIOS
+    # ========================================================================
+    - name: Aplicar configuración de filtros
+      pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
+        command: |
+          require_once("/etc/inc/filter.inc");
+          filter_configure();
+          clear_subsystem_dirty('filter');
+          clear_subsystem_dirty('natconf');
+      when: firewall_result.changed or nat_result.changed
+
+    # ========================================================================
+    # RESUMEN
+    # ========================================================================
+    - name: Resumen de configuración
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "CONECTIVIDAD INTERNET - VLAN SERVIDORES"
+          - "=========================================="
+          - ""
+          - "Router: {{ inventory_hostname }}"
+          - "IP: {{ pfsense_host }}"
+          - ""
+          - "Regla de Firewall:"
+          - "  {{ 'CREADA' if firewall_result.changed else 'YA EXISTIA' }}"
+          - "  Interface: SERVIDORES"
+          - "  Action: PASS"
+          - "  Source: SERVIDORES network (192.168.10.0/26)"
+          - "  Destination: ANY (Internet)"
+          - ""
+          - "Reglas NAT Outbound:"
+          - "  {{ 'CREADAS' if nat_result.changed else 'YA EXISTIAN' }}"
+          - "  WAN1: 192.168.10.0/26 → WAN"
+          - "  WAN2: 192.168.10.0/26 → OPT1"
+          - ""
+          - "✅ Ahora VLAN Servidores (192.168.10.0/26) tiene acceso a Internet"
+          - ""
+          - "Próximos pasos:"
+          - "  1. Ejecutar para BACKUP también"
+          - "  2. Probar desde Windows Server: ping 8.8.8.8"
+          - "=========================================="
+
+---
+- name: Permitir acceso a Internet desde VLAN Servidores - BACKUP
+  hosts: pfsense_router_backup
+  gather_facts: false
+  connection: local
+
+  vars:
+    pfsense_host: "172.17.25.65"
+    pfsense_username: "admin"
+    pfsense_password: "pfsense"
+
+  tasks:
+    # ========================================================================
+    # REGLA DE FIREWALL: SERVIDORES → INTERNET
+    # ========================================================================
+    - name: Crear regla para permitir Internet desde VLAN Servidores
+      pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
+        command: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          require_once("/etc/inc/filter.inc");
+          
+          global $config;
+          init_config_arr(array('filter', 'rule'));
+          $a_filter = &$config['filter']['rule'];
+          
+          // Función para verificar si regla existe
+          function rule_exists($rules, $descr) {
+              foreach ($rules as $rule) {
+                  if (isset($rule['descr']) && $rule['descr'] == $descr) {
+                      return true;
+                  }
+              }
+              return false;
+          }
+          
+          // Regla: VLAN 10 Servidores - Permitir Internet
+          if (!rule_exists($a_filter, 'Servidores - Allow Internet')) {
+              $rule = array(
+                  'type' => 'pass',
+                  'interface' => 'servidores',
+                  'ipprotocol' => 'inet',
+                  'protocol' => 'any',
+                  'source' => array('network' => 'servidores'),
+                  'destination' => array('any' => true),
+                  'descr' => 'Servidores - Allow Internet'
+              );
+              $a_filter[] = $rule;
+              write_config("Regla Internet para Servidores agregada via Ansible");
+              filter_configure();
+              clear_subsystem_dirty('filter');
+              echo "CREATED";
+          } else {
+              echo "EXISTS";
+          }
+      register: firewall_result
+      changed_when: "'CREATED' in firewall_result.stdout"
+
+    # ========================================================================
+    # VERIFICAR REGLAS NAT OUTBOUND
+    # ========================================================================
+    - name: Verificar NAT Outbound para VLAN Servidores
+      pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
+        command: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          
+          global $config;
+          init_config_arr(array('nat', 'outbound', 'rule'));
+          $a_nat = &$config['nat']['outbound']['rule'];
+          
+          $found_wan1 = false;
+          $found_wan2 = false;
+          
+          foreach ($a_nat as $rule) {
+              if (isset($rule['descr'])) {
+                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'wan') {
+                      $found_wan1 = true;
+                  }
+                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'opt1') {
+                      $found_wan2 = true;
+                  }
+              }
+          }
+          
+          if (!$found_wan1 || !$found_wan2) {
+              // Agregar reglas NAT faltantes
+              if (!$found_wan1) {
+                  $nat_wan1 = array(
+                      'interface' => 'wan',
+                      'source' => array('network' => '192.168.10.0/26'),
+                      'destination' => array('any' => true),
+                      'descr' => 'NAT SERVIDORES via WAN1',
+                      'target' => '',
+                      'natport' => '',
+                      'staticnatport' => false,
+                      'disabled' => false
+                  );
+                  $a_nat[] = $nat_wan1;
+              }
+              
+              if (!$found_wan2) {
+                  $nat_wan2 = array(
+                      'interface' => 'opt1',
+                      'source' => array('network' => '192.168.10.0/26'),
+                      'destination' => array('any' => true),
+                      'descr' => 'NAT SERVIDORES via WAN2',
+                      'target' => '',
+                      'natport' => '',
+                      'staticnatport' => false,
+                      'disabled' => false
+                  );
+                  $a_nat[] = $nat_wan2;
+              }
+              
+              write_config("Reglas NAT Outbound para Servidores agregadas via Ansible");
+              filter_configure();
+              clear_subsystem_dirty('natconf');
+              echo "CREATED";
+          } else {
+              echo "EXISTS";
+          }
+      register: nat_result
+      changed_when: "'CREATED' in nat_result.stdout"
+
+    # ========================================================================
+    # APLICAR CAMBIOS
+    # ========================================================================
+    - name: Aplicar configuración de filtros
+      pfsensible.core.pfsense_phpshell:
+        pfsense_host: "{{ pfsense_host }}"
+        pfsense_username: "{{ pfsense_username }}"
+        pfsense_password: "{{ pfsense_password }}"
+        command: |
+          require_once("/etc/inc/filter.inc");
+          filter_configure();
+          clear_subsystem_dirty('filter');
+          clear_subsystem_dirty('natconf');
+      when: firewall_result.changed or nat_result.changed
+
+    # ========================================================================
+    # RESUMEN
+    # ========================================================================
+    - name: Resumen de configuración
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "CONECTIVIDAD INTERNET - VLAN SERVIDORES"
+          - "=========================================="
+          - ""
+          - "Router: {{ inventory_hostname }}"
+          - "IP: {{ pfsense_host }}"
+          - ""
+          - "Regla de Firewall:"
+          - "  {{ 'CREADA' if firewall_result.changed else 'YA EXISTIA' }}"
+          - "  Interface: SERVIDORES"
+          - "  Action: PASS"
+          - "  Source: SERVIDORES network (192.168.10.0/26)"
+          - "  Destination: ANY (Internet)"
+          - ""
+          - "Reglas NAT Outbound:"
+          - "  {{ 'CREADAS' if nat_result.changed else 'YA EXISTIAN' }}"
+          - "  WAN1: 192.168.10.0/26 → WAN"
+          - "  WAN2: 192.168.10.0/26 → OPT1"
+          - ""
+          - "✅ Configuración completada en BACKUP"
+          - ""
+          - "Prueba desde el Windows Server (DC01):"
+          - "  ping 8.8.8.8"
+          - "  Test-NetConnection google.com"
+          - "  nslookup google.com"
+          - "=========================================="
