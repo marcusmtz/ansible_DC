@@ -612,7 +612,6 @@
           $config['hasync']['pfsyncpeerip']    = '{{ ha_sync_peer }}';
 
           write_config("pfsync configurado via Ansible");
-          filter_configure();
       no_log: true
 
     # ========================================================================
@@ -654,7 +653,6 @@
           $config['hasync']['synchronizecaptiveportal']           = 'on';
 
           write_config("HA XMLRPC Sync configurado via Ansible (solo Master)");
-          filter_configure();
 
     # ========================================================================
     # APLICAR CONFIGURACION FINAL
@@ -670,6 +668,12 @@
           filter_configure();
           clear_subsystem_dirty('natconf');
           clear_subsystem_dirty('filter');
+
+    - name: Esperar a que SSH se reestablezca
+      tags: [filter, apply]
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 60
 
     # ========================================================================
     # RESUMEN FINAL
