@@ -14,7 +14,6 @@ wan2_gateway_name: WAN2_GW
 
 trunk_interface: vmx1
 
-carp_password: CARP_PASS_2024
 dhcp_relay_server: 192.168.10.5
 
 servidores_network: 192.168.10.0/26
