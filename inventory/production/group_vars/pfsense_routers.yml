@@ -1,0 +1,20 @@
+---
+pfsense_username: admin
+ansible_user: admin
+
+wan1_interface: vmx0
+wan1_subnet: 24
+wan1_gateway: 172.17.25.121
+wan1_gateway_name: WAN1_GW
+
+wan2_interface: vmx2
+wan2_subnet: 29
+wan2_gateway: 168.17.25.1
+wan2_gateway_name: WAN2_GW
+
+trunk_interface: vmx1
+
+carp_password: CARP_PASS_2024
+dhcp_relay_server: 192.168.10.5
+
+servidores_network: 192.168.10.0/26

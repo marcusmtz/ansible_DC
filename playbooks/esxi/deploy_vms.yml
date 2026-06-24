@@ -1,0 +1,83 @@
+---
+- hosts: esxi_hosts
+  gather_facts: no
+  collections: [community.vmware]
+
+  vars:
+    vm_defs:
+      - name: "Windows11Pro_pc01_G01"
+        ovf: "/mnt/d/Backup/GAMECENTER/Windows11Pro_pc01_G01/Windows11Pro_pc01_G01.ovf"
+        networks:
+          "vSW_G01": "vSW_G01"
+        disk_provisioning: thin
+        power_on: true
+
+    info_retries: 5
+    info_delay: 30
+
+  tasks:
+    - name: Deploy OVF/OVA desde disco local
+      community.vmware.vmware_deploy_ovf:
+        hostname: "{{ esxi_host }}"
+        port: "{{ esxi_port }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ datacenter_name }}"
+        datastore: "{{ ds_name }}"
+        resource_pool: "{{ resource_pool_name }}"
+        name: "{{ item.name }}"
+        ovf: "{{ item.ovf }}"
+        networks: "{{ item.networks }}"
+        disk_provisioning: "{{ item.disk_provisioning | default('thin') }}"
+        power_on: "{{ item.power_on | default(true) }}"
+        wait_for_ip_address: false
+        allow_duplicates: false
+      loop: "{{ vm_defs }}"
+      loop_control: { label: "{{ item.name }}" }
+
+    - name: Pausa breve antes de consultar info
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Obtener información de la VM desde ESXi
+      community.vmware.vmware_guest_info:
+        hostname: "{{ esxi_host }}"
+        port: "{{ esxi_port }}"
+        username: "{{ esxi_user }}"
+        password: "{{ esxi_pass }}"
+        validate_certs: "{{ validate_certs }}"
+        datacenter: "{{ datacenter_name }}"
+        name: "{{ item.name }}"
+      register: vm_info
+      until: vm_info is succeeded
+      retries: "{{ info_retries }}"
+      delay: "{{ info_delay }}"
+      loop: "{{ vm_defs }}"
+      loop_control: { label: "{{ item.name }}" }
+
+    - name: Mostrar resumen del despliegue
+      vars:
+        inst: "{{ item.instance | default({}) }}"
+        name_safe: "{{ item.item.name | default(inst.hw_name | default('N/A')) }}"
+        ips_v4: "{{ (inst.ipv4 | default([])) | list }}"
+        ips_v6: "{{ (inst.ipv6 | default([])) | list }}"
+        ips_all: "{{ ips_v4 + ips_v6 }}"
+        nics: "{{ inst.hw_interfaces | default([]) }}"
+        disks: "{{ inst.hw_disk | default([]) }}"
+        datastores: "{{ inst.hw_datastores | default([]) }}"
+        cpus: "{{ inst.hw_processor_count | default(0) }}"
+        mem_mb: "{{ inst.hw_memtotal_mb | default(0) }}"
+        power: "{{ inst.hw_power_status | default('unknown') }}"
+        guest: "{{ inst.guest_fullname | default('unknown') }}"
+      ansible.builtin.debug:
+        msg:
+          - "VM: {{ name_safe }}"
+          - "Power: {{ power }}  |  SO: {{ guest }}"
+          - "CPU/RAM: {{ cpus }} vCPU / {{ mem_mb }} MB"
+          - "Datastores: {{ datastores }}"
+          - "IPs: {{ ips_all }}"
+          - "Discos: {{ disks | length }}  |  NICs: {{ nics | length }}"
+      loop: "{{ vm_info.results }}"
+      loop_control:
+        label: "{{ item.item.name | default('VM') }}"

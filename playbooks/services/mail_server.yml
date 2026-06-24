@@ -1,0 +1,245 @@
+---
+- name: Configurar Ubuntu como servidor de correo iRedMail
+  hosts: ubuntu_mail
+  become: true
+
+  vars:
+    hostname_mail: mail
+    domain_mail: norcom.internal
+    fqdn: "{{ hostname_mail }}.{{ domain_mail }}"
+    mail_ip: "192.168.10.9"
+    dns_master_ip: "192.168.10.5"
+    dns_secondary_ip: "192.168.10.6"
+    iredmail_version: "1.7.2"
+    iredmail_admin_password: "{{ iredmail_admin_password }}"
+
+  tasks:
+    - name: Actualizar paquetes
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: safe
+      register: apt_result
+      until: apt_result is succeeded
+      retries: 5
+      delay: 10
+
+    - name: Instalar dependencias basicas
+      ansible.builtin.apt:
+        name:
+          - wget
+          - curl
+          - vim
+          - net-tools
+          - unzip
+          - software-properties-common
+          - ufw
+        state: present
+
+    - name: Configurar timezone
+      ansible.builtin.timezone:
+        name: America/Lima
+
+    # iRedMail requiere que el hostname sea el FQDN completo
+    - name: Configurar hostname como FQDN
+      ansible.builtin.hostname:
+        name: "{{ fqdn }}"
+
+    - name: Configurar /etc/hosts - entrada del servidor de correo
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "^{{ mail_ip }}\\s"
+        line: "{{ mail_ip }} {{ fqdn }} {{ hostname_mail }}"
+
+    - name: Configurar /etc/hosts - entrada del DNS master
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "^{{ dns_master_ip }}\\s"
+        line: "{{ dns_master_ip }} dc1.norcom.internal dc1"
+
+    - name: Configurar /etc/hosts - entrada del DNS secundario
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "^{{ dns_secondary_ip }}\\s"
+        line: "{{ dns_secondary_ip }} dns2.norcom.internal dns2"
+
+    - name: Crear directorio drop-in para systemd-resolved
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: '0755'
+
+    - name: Configurar DNS en systemd-resolved
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/iredmail-dns.conf
+        mode: '0644'
+        content: |
+          [Resolve]
+          DNS={{ dns_master_ip }} {{ dns_secondary_ip }} 8.8.8.8
+          Domains={{ domain_mail }}
+      notify: Reiniciar systemd-resolved
+
+    - name: Forzar reinicio de DNS inmediato
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+
+    - name: Instalar iRedMail con proteccion de firewall
+      block:
+        - name: Deshabilitar UFW temporalmente para permitir descargas
+          ansible.builtin.ufw:
+            state: disabled
+
+        - name: Descargar iRedMail (Forzando IPv4 vía curl)
+          ansible.builtin.shell:
+            cmd: "curl -4 -L -s -S https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz -o /opt/iredmail.tar.gz"
+          register: download_result
+          until: download_result.rc == 0
+          retries: 5
+          delay: 10
+          args:
+            creates: /opt/iredmail.tar.gz
+
+        - name: Extraer iRedMail
+          ansible.builtin.unarchive:
+            src: /opt/iredmail.tar.gz
+            dest: /opt/
+            remote_src: true
+            creates: "/opt/iRedMail-{{ iredmail_version }}"
+
+        - name: Crear archivo de respuestas para instalacion no interactiva
+          ansible.builtin.copy:
+            dest: "/opt/iRedMail-{{ iredmail_version }}/config"
+            mode: '0600'
+            content: |
+              # iRedMail config - generado por Ansible
+
+              # Directorio de almacenamiento
+              export STORAGE_BASE_DIR='/var/vmail'
+              export STORAGE_MAILBOX_DIR='/var/vmail/vmail1'
+              export SIEVE_DIR='/var/vmail/sieve'
+              export BACKUP_DIR='/var/vmail/backup'
+              export BACKUP_SCRIPT_CRON_SETTING='1 3 * * *'
+
+              # Backend de base de datos
+              export BACKEND_ORIG='MySQL'
+              export BACKEND='MYSQL'
+
+              # MySQL root
+              export MYSQL_ROOT_PASSWORD='{{ iredmail_admin_password }}'
+              export MYSQL_GRANT_HOST='127.0.0.1'
+
+              # Base de datos vmail
+              export VMAIL_DB_BACKEND='mysql'
+              export VMAIL_DB_NAME='vmail'
+              export VMAIL_DB_BIND_USER='vmail'
+              export VMAIL_DB_BIND_PASSWD='{{ iredmail_admin_password }}'
+              export VMAIL_DB_ADMIN_USER='vmailadmin'
+              export VMAIL_DB_ADMIN_PASSWD='{{ iredmail_admin_password }}'
+
+              # Dominio y admin principal
+              export FIRST_DOMAIN='{{ domain_mail }}'
+              export DOMAIN_ADMIN_PASSWD_PLAIN='{{ iredmail_admin_password }}'
+
+              # iRedAdmin
+              export USE_IREDADMIN='YES'
+              export IREDADMIN_DB_NAME='iredadmin'
+              export IREDADMIN_DB_USER='iredadmin'
+              export IREDADMIN_DB_PASS='{{ iredmail_admin_password }}'
+
+              # Roundcube
+              export USE_ROUNDCUBE='YES'
+              export RCM_DB_NAME='roundcubemail'
+              export RCM_DB_USER='roundcube'
+              export RCM_DB_PASS='{{ iredmail_admin_password }}'
+
+              # Otros componentes
+              export USE_FAIL2BAN='YES'
+              export USE_NETDATA='YES'
+              export USE_SOGO='NO'
+
+        - name: Ejecutar instalador iRedMail (no interactivo)
+          ansible.builtin.shell:
+            cmd: "printf 'y\n' | bash iRedMail.sh"
+            chdir: "/opt/iRedMail-{{ iredmail_version }}"
+          environment:
+            DEBIAN_FRONTEND: noninteractive
+          args:
+            creates: /etc/postfix/main.cf
+          register: iredmail_install
+          timeout: 1800
+
+        - name: Mostrar resultado de instalacion
+          ansible.builtin.debug:
+            var: iredmail_install.stdout_lines
+          when: iredmail_install.changed
+
+      always:
+        - name: Permitir SSH
+          ansible.builtin.ufw:
+            rule: allow
+            port: '22'
+            proto: tcp
+
+        - name: Permitir HTTP
+          ansible.builtin.ufw:
+            rule: allow
+            port: '80'
+            proto: tcp
+
+        - name: Permitir HTTPS
+          ansible.builtin.ufw:
+            rule: allow
+            port: '443'
+            proto: tcp
+
+        - name: Permitir SMTP
+          ansible.builtin.ufw:
+            rule: allow
+            port: '25'
+            proto: tcp
+
+        - name: Permitir SMTP Submission
+          ansible.builtin.ufw:
+            rule: allow
+            port: '587'
+            proto: tcp
+
+        - name: Permitir SMTPS
+          ansible.builtin.ufw:
+            rule: allow
+            port: '465'
+            proto: tcp
+
+        - name: Permitir IMAP
+          ansible.builtin.ufw:
+            rule: allow
+            port: '143'
+            proto: tcp
+
+        - name: Permitir IMAPS
+          ansible.builtin.ufw:
+            rule: allow
+            port: '993'
+            proto: tcp
+
+        - name: Permitir POP3
+          ansible.builtin.ufw:
+            rule: allow
+            port: '110'
+            proto: tcp
+
+        - name: Permitir POP3S
+          ansible.builtin.ufw:
+            rule: allow
+            port: '995'
+            proto: tcp
+
+        - name: Habilitar UFW
+          ansible.builtin.ufw:
+            state: enabled
+
+  handlers:
+    - name: Reiniciar systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted

@@ -1,0 +1,46 @@
+---
+pfsense_host: 172.17.25.65
+wan1_address: 172.17.25.65
+wan2_address: 168.17.25.3
+ha_sync_peer: 192.168.10.2
+hostname: pfsense-backup
+carp_role: BACKUP
+is_master: false
+
+vlans:
+  - vlan_id: 10
+    name: SERVIDORES
+    descr: "VLAN 10 - Servidores"
+    ipaddr: 192.168.10.3
+    subnet: 26
+    vip: 192.168.10.1
+    vhid: 10
+    advskew: 100
+    egress_wan: wan1
+  - vlan_id: 20
+    name: ADMINISTRACION
+    descr: "VLAN 20 - Administracion"
+    ipaddr: 192.168.20.3
+    subnet: 25
+    vip: 192.168.20.1
+    vhid: 20
+    advskew: 100
+    egress_wan: wan1
+  - vlan_id: 30
+    name: TI
+    descr: "VLAN 30 - TI"
+    ipaddr: 192.168.30.3
+    subnet: 26
+    vip: 192.168.30.1
+    vhid: 30
+    advskew: 100
+    egress_wan: wan2
+  - vlan_id: 40
+    name: VENTAS
+    descr: "VLAN 40 - Ventas"
+    ipaddr: 192.168.40.3
+    subnet: 25
+    vip: 192.168.40.1
+    vhid: 40
+    advskew: 100
+    egress_wan: wan2

@@ -1,0 +1,7 @@
+---
+domain: norcom.internal
+timezone: America/Lima
+dns_servers:
+  - 192.168.10.5
+  - 192.168.10.6
+  - 8.8.8.8

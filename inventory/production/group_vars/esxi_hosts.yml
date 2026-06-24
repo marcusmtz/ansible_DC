@@ -1,0 +1,9 @@
+---
+esxi_host: 172.17.25.20
+esxi_port: 443
+validate_certs: false
+datacenter_name: ha-datacenter
+ds_name: datastore1
+resource_pool_name: Resources
+iso_folder: MartinezG01VI
+esxi_hostname_fqdn: localhost.lim.upeu.edu.pe

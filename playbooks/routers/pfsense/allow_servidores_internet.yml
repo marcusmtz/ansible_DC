@@ -1,0 +1,130 @@
+---
+- name: Permitir acceso a Internet desde VLAN Servidores (Master + Backup)
+  hosts: pfsense_routers
+  gather_facts: false
+  connection: ssh
+
+  tasks:
+    - name: Crear regla firewall Internet para VLAN Servidores
+      tags: [firewall, internet]
+      pfsensible.core.pfsense_phpshell:
+        cmd: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          require_once("/etc/inc/filter.inc");
+
+          global $config;
+          init_config_arr(array('filter', 'rule'));
+          $a_filter = &$config['filter']['rule'];
+
+          function rule_exists($rules, $descr) {
+              foreach ($rules as $rule) {
+                  if (isset($rule['descr']) && $rule['descr'] == $descr) {
+                      return true;
+                  }
+              }
+              return false;
+          }
+
+          if (!rule_exists($a_filter, 'Servidores - Allow Internet')) {
+              $a_filter[] = array(
+                  'type'        => 'pass',
+                  'interface'   => 'servidores',
+                  'ipprotocol'  => 'inet',
+                  'protocol'    => 'any',
+                  'source'      => array('network' => 'servidores'),
+                  'destination' => array('any' => true),
+                  'descr'       => 'Servidores - Allow Internet'
+              );
+              write_config("Regla Internet para Servidores agregada via Ansible");
+              filter_configure();
+              clear_subsystem_dirty('filter');
+              echo "CREATED";
+          } else {
+              echo "EXISTS";
+          }
+      register: firewall_result
+      changed_when: "'CREATED' in firewall_result.stdout"
+
+    - name: Verificar y crear NAT Outbound para VLAN Servidores
+      tags: [nat, internet]
+      pfsensible.core.pfsense_phpshell:
+        cmd: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+
+          global $config;
+          init_config_arr(array('nat', 'outbound', 'rule'));
+          $a_nat = &$config['nat']['outbound']['rule'];
+
+          $found_wan1 = false;
+          $found_wan2 = false;
+
+          foreach ($a_nat as $rule) {
+              if (isset($rule['descr'])) {
+                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'wan')  { $found_wan1 = true; }
+                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'opt1') { $found_wan2 = true; }
+              }
+          }
+
+          if (!$found_wan1) {
+              $a_nat[] = array(
+                  'interface'     => 'wan',
+                  'source'        => array('network' => '{{ servidores_network }}'),
+                  'destination'   => array('any' => true),
+                  'target'        => '{{ wan1_address }}',
+                  'descr'         => 'NAT SERVIDORES via WAN1',
+                  'natport'       => '',
+                  'staticnatport' => false,
+                  'nonat'         => false,
+                  'disabled'      => false
+              );
+          }
+
+          if (!$found_wan2) {
+              $a_nat[] = array(
+                  'interface'     => 'opt1',
+                  'source'        => array('network' => '{{ servidores_network }}'),
+                  'destination'   => array('any' => true),
+                  'target'        => '{{ wan2_address }}',
+                  'descr'         => 'NAT SERVIDORES via WAN2',
+                  'natport'       => '',
+                  'staticnatport' => false,
+                  'nonat'         => false,
+                  'disabled'      => false
+              );
+          }
+
+          if (!$found_wan1 || !$found_wan2) {
+              write_config("Reglas NAT Outbound para Servidores agregadas via Ansible");
+              filter_configure();
+              clear_subsystem_dirty('natconf');
+              echo "CREATED";
+          } else {
+              echo "EXISTS";
+          }
+      register: nat_result
+      changed_when: "'CREATED' in nat_result.stdout"
+
+    - name: Aplicar filtros finales
+      tags: [filter, apply]
+      pfsensible.core.pfsense_phpshell:
+        cmd: |
+          require_once("/etc/inc/filter.inc");
+          filter_configure();
+          clear_subsystem_dirty('filter');
+          clear_subsystem_dirty('natconf');
+      when: firewall_result.changed or nat_result.changed
+
+    - name: Resumen
+      tags: [always, output]
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "CONECTIVIDAD INTERNET - VLAN SERVIDORES"
+          - "=========================================="
+          - "Host         : {{ hostname }} (Rol: {{ carp_role }})"
+          - "Regla Firewall: {{ 'CREADA' if firewall_result.changed else 'YA EXISTIA' }}"
+          - "Reglas NAT   : {{ 'CREADAS' if nat_result.changed else 'YA EXISTIAN' }}"
+          - "Red          : {{ servidores_network }} -> WAN IPs"
+          - "=========================================="

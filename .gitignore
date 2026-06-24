@@ -1,0 +1,10 @@
+# Vault password file (no compartir)
+.vault_pass
+.vault_pass.sh
+
+# Ansible retry files
+*.retry
+
+# Backups
+*~
+*.backup.*

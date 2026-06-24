@@ -1,0 +1,147 @@
+---
+- name: Configurar Ubuntu como file server (Samba + Active Directory)
+  hosts: ubuntu_file_server
+  become: true
+
+  vars:
+    smb_shares:
+      - name: CompartidoAdmin
+        path: /srv/samba/admin
+        group: Administracion
+      - name: CompartidoTI
+        path: /srv/samba/ti
+        group: TI
+      - name: CompartidoVentas
+        path: /srv/samba/ventas
+        group: Ventas
+    domain: norcom.internal
+    domain_upper: NORCOM
+    domain_admin: Administrador
+    domain_admin_password: "{{ domain_admin_password }}"
+
+  tasks:
+    - name: Instalar paquetes necesarios
+      ansible.builtin.apt:
+        name:
+          - samba
+          - winbind
+          - libpam-winbind
+          - libnss-winbind
+          - krb5-user
+          - realmd
+          - sssd
+          - sssd-tools
+          - adcli
+        state: present
+        update_cache: true
+
+    - name: Unir al dominio Active Directory
+      ansible.builtin.shell: |
+        if realm list | grep -q "{{ domain }}"; then
+          echo "ALREADY_JOINED"
+        else
+          echo "{{ domain_admin_password }}" | realm join --user={{ domain_admin }} {{ domain }}
+          echo "JOINED"
+        fi
+      args:
+        executable: /bin/bash
+      register: realm_join
+      changed_when: "'JOINED' in realm_join.stdout"
+
+    - name: Agregar winbind a nsswitch passwd
+      ansible.builtin.lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^passwd:'
+        line: 'passwd:         compat winbind'
+
+    - name: Agregar winbind a nsswitch group
+      ansible.builtin.lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^group:'
+        line: 'group:          compat winbind'
+
+    - name: Configurar Samba para Active Directory
+      ansible.builtin.copy:
+        dest: /etc/samba/smb.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [global]
+              workgroup = {{ domain_upper }}
+              realm = {{ domain | upper }}
+              security = ADS
+
+              idmap config * : backend = tdb
+              idmap config * : range = 1000-9999
+              idmap config {{ domain_upper }} : backend = rid
+              idmap config {{ domain_upper }} : range = 10000-99999
+
+              winbind use default domain = yes
+              winbind enum users = yes
+              winbind enum groups = yes
+              winbind refresh tickets = yes
+
+              server min protocol = SMB2
+              server max protocol = SMB3
+
+          {% for share in smb_shares %}
+          [{{ share.name }}]
+              path = {{ share.path }}
+              browseable = yes
+              read only = no
+              guest ok = no
+              valid users = @"{{ domain_upper }}\{{ share.group }}"
+              create mask = 0660
+              directory mask = 0770
+
+          {% endfor %}
+      notify: Restart samba
+
+    - name: Crear carpetas de recursos compartidos
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0770"
+      loop: "{{ smb_shares }}"
+
+    - name: Validar configuracion de Samba
+      ansible.builtin.command: testparm -s
+      register: samba_config_test
+      changed_when: false
+
+    - name: Habilitar y arrancar winbind
+      ansible.builtin.service:
+        name: winbind
+        enabled: true
+        state: started
+
+    - name: Habilitar y arrancar smbd
+      ansible.builtin.service:
+        name: smbd
+        enabled: true
+        state: started
+
+    - name: Habilitar y arrancar nmbd
+      ansible.builtin.service:
+        name: nmbd
+        enabled: true
+        state: started
+
+    - name: Permitir Samba en UFW si esta activo
+      ansible.builtin.command: ufw allow Samba
+      register: ufw_samba
+      changed_when: "'Rule added' in ufw_samba.stdout or 'updated' in ufw_samba.stdout"
+      failed_when: false
+
+  handlers:
+    - name: Restart samba
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: restarted
+      with_items:
+        - smbd
+        - winbind
+        - nmbd
