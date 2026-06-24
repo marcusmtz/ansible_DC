@@ -111,112 +111,80 @@
           }
 
     # ========================================================================
-    # CONFIGURAR INTERFAZ WAN1
+    # GATEWAYS (interfaces WAN ya configuradas manualmente por terminal)
     # ========================================================================
-    - name: Configurar interfaz WAN1 y gateway
-      tags: [wan, interface]
+    - name: Renombrar gateway WAN1 a {{ wan1_gateway_name }}
+      tags: [wan, gateway]
       pfsensible.core.pfsense_phpshell:
         cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
-          require_once("/etc/inc/interfaces.inc");
 
           global $config;
-
-          $config['interfaces']['wan']['if']          = '{{ wan1_interface }}';
-          $config['interfaces']['wan']['descr']        = 'WAN';
-          $config['interfaces']['wan']['enable']       = true;
-          $config['interfaces']['wan']['ipaddr']       = '{{ wan1_address }}';
-          $config['interfaces']['wan']['subnet']       = '{{ wan1_subnet }}';
-          $config['interfaces']['wan']['gateway']      = '{{ wan1_gateway_name }}';
-          $config['interfaces']['wan']['blockbogons']  = false;
-          $config['interfaces']['wan']['blockpriv']    = false;
-
           init_config_arr(array('gateways', 'gateway_item'));
           $a_gateways = &$config['gateways']['gateway_item'];
 
           $found = false;
           foreach ($a_gateways as $idx => $gw) {
-              if ($gw['name'] == '{{ wan1_gateway_name }}') {
-                  $found    = true;
-                  $gw_idx   = $idx;
+              if ($gw['interface'] == 'wan') {
+                  $a_gateways[$idx]['name'] = '{{ wan1_gateway_name }}';
+                  $a_gateways[$idx]['gateway'] = '{{ wan1_gateway }}';
+                  $a_gateways[$idx]['descr'] = 'Gateway ISP Principal';
+                  $found = true;
                   break;
               }
           }
 
-          $gateway_data = array(
-              'name'            => '{{ wan1_gateway_name }}',
-              'interface'       => 'wan',
-              'gateway'         => '{{ wan1_gateway }}',
-              'ipprotocol'      => 'inet',
-              'descr'           => 'Gateway ISP Principal',
-              'monitor_disable' => false
-          );
-
-          if ($found) {
-              $a_gateways[$gw_idx] = $gateway_data;
-          } else {
-              $a_gateways[] = $gateway_data;
+          if (!$found) {
+              $a_gateways[] = array(
+                  'name'            => '{{ wan1_gateway_name }}',
+                  'interface'       => 'wan',
+                  'gateway'         => '{{ wan1_gateway }}',
+                  'ipprotocol'      => 'inet',
+                  'descr'           => 'Gateway ISP Principal',
+                  'monitor_disable' => false
+              );
           }
 
-          write_config("WAN1 configurado via Ansible");
-          interface_configure('wan');
+          write_config("Gateway {{ wan1_gateway_name }} configurado via Ansible");
 
     # ========================================================================
-    # CONFIGURAR INTERFAZ WAN2 (OPT1)
+    # CONFIGURAR INTERFAZ WAN2 (OPT1) Y GATEWAY
     # ========================================================================
-    - name: Configurar interfaz WAN2 (OPT1) y gateway
-      tags: [wan, interface]
+    - name: Renombrar gateway WAN2 a {{ wan2_gateway_name }}
+      tags: [wan, gateway]
       pfsensible.core.pfsense_phpshell:
         cmd: |
           require_once("/etc/inc/config.inc");
           require_once("/etc/inc/util.inc");
-          require_once("/etc/inc/interfaces.inc");
 
           global $config;
-
-          if (!isset($config['interfaces']['opt1'])) {
-              $config['interfaces']['opt1'] = array();
-          }
-
-          $config['interfaces']['opt1']['if']         = '{{ wan2_interface }}';
-          $config['interfaces']['opt1']['descr']       = 'WAN2';
-          $config['interfaces']['opt1']['enable']      = true;
-          $config['interfaces']['opt1']['ipaddr']      = '{{ wan2_address }}';
-          $config['interfaces']['opt1']['subnet']      = '{{ wan2_subnet }}';
-          $config['interfaces']['opt1']['gateway']     = '{{ wan2_gateway_name }}';
-          $config['interfaces']['opt1']['blockbogons'] = false;
-          $config['interfaces']['opt1']['blockpriv']   = false;
-
           init_config_arr(array('gateways', 'gateway_item'));
           $a_gateways = &$config['gateways']['gateway_item'];
 
           $found = false;
           foreach ($a_gateways as $idx => $gw) {
-              if ($gw['name'] == '{{ wan2_gateway_name }}') {
-                  $found  = true;
-                  $gw_idx = $idx;
+              if ($gw['interface'] == 'opt1') {
+                  $a_gateways[$idx]['name'] = '{{ wan2_gateway_name }}';
+                  $a_gateways[$idx]['gateway'] = '{{ wan2_gateway }}';
+                  $a_gateways[$idx]['descr'] = 'Gateway ISP Secundario';
+                  $found = true;
                   break;
               }
           }
 
-          $gateway_data = array(
-              'name'            => '{{ wan2_gateway_name }}',
-              'interface'       => 'opt1',
-              'gateway'         => '{{ wan2_gateway }}',
-              'ipprotocol'      => 'inet',
-              'descr'           => 'Gateway ISP Secundario',
-              'monitor_disable' => false
-          );
-
-          if ($found) {
-              $a_gateways[$gw_idx] = $gateway_data;
-          } else {
-              $a_gateways[] = $gateway_data;
+          if (!$found) {
+              $a_gateways[] = array(
+                  'name'            => '{{ wan2_gateway_name }}',
+                  'interface'       => 'opt1',
+                  'gateway'         => '{{ wan2_gateway }}',
+                  'ipprotocol'      => 'inet',
+                  'descr'           => 'Gateway ISP Secundario',
+                  'monitor_disable' => false
+              );
           }
 
-          write_config("WAN2 configurado via Ansible");
-          interface_configure('opt1');
+          write_config("Gateway {{ wan2_gateway_name }} configurado via Ansible");
 
     # ========================================================================
     # GATEWAY GROUP DUAL WAN
@@ -388,9 +356,9 @@
       no_log: true
 
     # ========================================================================
-    # NAT OUTBOUND MODE HYBRID
+    # NAT OUTBOUND MODE MANUAL (borra reglas auto)
     # ========================================================================
-    - name: Configurar modo Hybrid Outbound NAT
+    - name: Configurar modo Manual Outbound NAT y limpiar reglas
       tags: [nat, outbound]
       pfsensible.core.pfsense_phpshell:
         cmd: |
@@ -399,11 +367,12 @@
 
           global $config;
           init_config_arr(array('nat', 'outbound'));
-          $config['nat']['outbound']['mode'] = 'hybrid';
-          write_config("NAT Outbound mode configurado a Hybrid via Ansible");
+          $config['nat']['outbound']['mode'] = 'manual';
+          $config['nat']['outbound']['rule'] = array();
+          write_config("NAT Outbound mode configurado a Manual via Ansible (reglas auto eliminadas)");
 
     # ========================================================================
-    # NAT OUTBOUND RULES  (target CORREGIDO: usa IPs de WAN)
+    # NAT OUTBOUND RULES  (modo Manual, sin reglas auto)
     # ========================================================================
     - name: "Crear reglas NAT Outbound para {{ item.name }}"
       tags: [nat, outbound]
@@ -416,7 +385,7 @@
           init_config_arr(array('nat', 'outbound', 'rule'));
           $a_nat = &$config['nat']['outbound']['rule'];
 
-          $nat_wan1 = array(
+          $a_nat[] = array(
               'interface'     => 'wan',
               'source'        => array('network' => '{{ item.ipaddr }}/{{ item.subnet }}'),
               'destination'   => array('any' => true),
@@ -428,7 +397,7 @@
               'disabled'      => false
           );
 
-          $nat_wan2 = array(
+          $a_nat[] = array(
               'interface'     => 'opt1',
               'source'        => array('network' => '{{ item.ipaddr }}/{{ item.subnet }}'),
               'destination'   => array('any' => true),
@@ -440,22 +409,46 @@
               'disabled'      => false
           );
 
-          $found_wan1 = false;
-          $found_wan2 = false;
-          foreach ($a_nat as $rule) {
-              if (isset($rule['descr'])) {
-                  if ($rule['descr'] == 'NAT {{ item.name }} via WAN1') { $found_wan1 = true; }
-                  if ($rule['descr'] == 'NAT {{ item.name }} via WAN2') { $found_wan2 = true; }
-              }
-          }
-
-          if (!$found_wan1) { $a_nat[] = $nat_wan1; }
-          if (!$found_wan2) { $a_nat[] = $nat_wan2; }
-
           write_config("NAT Outbound {{ item.name }} configurado via Ansible");
       loop: "{{ vlans }}"
       loop_control:
         label: "NAT {{ item.name }}"
+
+    # ========================================================================
+    # NAT LOCALHOST (trafico del propio pfSense: DNS, NTP, etc.)
+    # ========================================================================
+    - name: Crear regla NAT para trafico localhost del pfSense
+      tags: [nat, outbound]
+      pfsensible.core.pfsense_phpshell:
+        cmd: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+
+          global $config;
+          init_config_arr(array('nat', 'outbound', 'rule'));
+          $a_nat = &$config['nat']['outbound']['rule'];
+
+          $found = false;
+          foreach ($a_nat as $rule) {
+              if (isset($rule['descr']) && $rule['descr'] == 'NAT localhost pfSense via WAN1') {
+                  $found = true;
+                  break;
+              }
+          }
+          if (!$found) {
+              $a_nat[] = array(
+                  'interface'     => 'wan',
+                  'source'        => array('address' => '127.0.0.0/8'),
+                  'destination'   => array('any' => true),
+                  'target'        => '{{ wan1_address }}',
+                  'descr'         => 'NAT localhost pfSense via WAN1',
+                  'natport'       => '',
+                  'staticnatport' => false,
+                  'nonat'         => false,
+                  'disabled'      => false
+              );
+              write_config("NAT localhost pfSense configurado via Ansible");
+          }
 
     # ========================================================================
     # REGLAS DE FIREWALL
@@ -699,11 +692,11 @@
           - "=========================================="
           - "Hostname   : {{ hostname }}"
           - "Rol CARP   : {{ carp_role }}"
-          - "WAN1       : {{ wan1_address }}/{{ wan1_subnet }} GW={{ wan1_gateway }}"
-          - "WAN2       : {{ wan2_address }}/{{ wan2_subnet }} GW={{ wan2_gateway }}"
+          - "WAN1       : {{ wan1_address }}/{{ wan1_subnet }} GW={{ wan1_gateway }} (config manual)"
+          - "WAN2       : {{ wan2_address }}/{{ wan2_subnet }} GW={{ wan2_gateway }} (config manual)"
           - "Gateway    : WAN1_PRIMARY (Servidores+Admin) / WAN2_PRIMARY (TI+Ventas)"
           - "VLANs      : {{ vlan_summary | replace('\n', '\n           ') }}"
-          - "NAT        : Hybrid Outbound + 2 reglas/VLAN (wan+opt1) para failover"
+          - "NAT        : Manual Outbound + 2 reglas/VLAN (wan+opt1) para failover"
           - "DHCP Relay : {{ dhcp_relay_server }}"
           - "HA pfsync  : peer={{ ha_sync_peer }}"
           - "HA XMLRPC  : {{ 'activo (Master -> Backup)' if is_master else 'solo pfsync (Backup)' }}"

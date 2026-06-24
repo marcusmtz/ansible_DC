@@ -1,6 +1,6 @@
 ---
-pfsense_host: 172.17.25.64
-wan1_address: 172.17.25.64
+pfsense_host: 172.17.25.81
+wan1_address: 172.17.25.81
 wan2_address: 168.17.25.2
 ha_sync_peer: 192.168.10.3
 hostname: pfsense-master
