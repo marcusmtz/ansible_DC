@@ -5,7 +5,14 @@
   connection: ssh
 
   tasks:
-    - name: Crear regla firewall Internet para VLAN Servidores
+    # ========================================================================
+    # REGLA FIREWALL - SERVIDORES -> INTERNET
+    # FIX: Se agrega 'gateway' => 'WAN1_PRIMARY' para policy routing correcto.
+    #      Sin este campo pfSense usa la tabla de routing por defecto y el NAT
+    #      outbound no puede determinar la WAN de salida -> Default Deny.
+    # La logica es upsert (crea si no existe, actualiza si le falta gateway).
+    # ========================================================================
+    - name: Crear/actualizar regla firewall Internet para VLAN Servidores
       tags: [firewall, internet]
       pfsensible.core.pfsense_phpshell:
         cmd: |
@@ -17,35 +24,89 @@
           init_config_arr(array('filter', 'rule'));
           $a_filter = &$config['filter']['rule'];
 
-          function rule_exists($rules, $descr) {
-              foreach ($rules as $rule) {
-                  if (isset($rule['descr']) && $rule['descr'] == $descr) {
-                      return true;
-                  }
+          $target_descr = 'Servidores - Allow Internet';
+          $found_idx    = -1;
+
+          foreach ($a_filter as $idx => $rule) {
+              if (isset($rule['descr']) && $rule['descr'] == $target_descr) {
+                  $found_idx = $idx;
+                  break;
               }
-              return false;
           }
 
-          if (!rule_exists($a_filter, 'Servidores - Allow Internet')) {
-              $a_filter[] = array(
-                  'type'        => 'pass',
-                  'interface'   => 'servidores',
-                  'ipprotocol'  => 'inet',
-                  'protocol'    => 'any',
-                  'source'      => array('network' => 'servidores'),
-                  'destination' => array('any' => true),
-                  'descr'       => 'Servidores - Allow Internet'
-              );
-              write_config("Regla Internet para Servidores agregada via Ansible");
-              filter_configure();
-              clear_subsystem_dirty('filter');
+          // Regla con gateway explicito (CRITICO para dual-WAN + NAT manual)
+          $new_rule = array(
+              'type'        => 'pass',
+              'interface'   => 'servidores',
+              'ipprotocol'  => 'inet',
+              'protocol'    => 'any',
+              'source'      => array('network' => 'servidores'),
+              'destination' => array('any' => true),
+              'gateway'     => 'WAN1_PRIMARY',
+              'descr'       => $target_descr
+          );
+
+          if ($found_idx === -1) {
+              $a_filter[] = $new_rule;
+              write_config("Regla Internet para Servidores creada via Ansible");
               echo "CREATED";
           } else {
-              echo "EXISTS";
+              // Actualizar si le falta el gateway (fix idempotente)
+              $existing = $a_filter[$found_idx];
+              if (!isset($existing['gateway']) || $existing['gateway'] != 'WAN1_PRIMARY') {
+                  $a_filter[$found_idx] = $new_rule;
+                  write_config("Regla Internet para Servidores ACTUALIZADA (gateway agregado) via Ansible");
+                  echo "UPDATED";
+              } else {
+                  echo "EXISTS_OK";
+              }
           }
       register: firewall_result
-      changed_when: "'CREATED' in firewall_result.stdout"
+      changed_when: "'CREATED' in firewall_result.stdout or 'UPDATED' in firewall_result.stdout"
 
+    # ========================================================================
+    # FIX RETROACTIVO: Corregir regla legacy creada por site.yml sin gateway
+    # Si 'Servidores acceso completo' existe pero sin gateway, la actualiza.
+    # ========================================================================
+    - name: Corregir regla legacy de site.yml si existe sin gateway
+      tags: [firewall, internet, fix]
+      pfsensible.core.pfsense_phpshell:
+        cmd: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
+          require_once("/etc/inc/filter.inc");
+
+          global $config;
+          init_config_arr(array('filter', 'rule'));
+          $a_filter = &$config['filter']['rule'];
+
+          $legacy_descr = 'Servidores acceso completo';
+          $changed      = false;
+
+          foreach ($a_filter as $idx => $rule) {
+              if (isset($rule['descr']) && $rule['descr'] == $legacy_descr) {
+                  if (!isset($rule['gateway']) || $rule['gateway'] != 'WAN1_PRIMARY') {
+                      $a_filter[$idx]['gateway'] = 'WAN1_PRIMARY';
+                      $changed = true;
+                  }
+                  break;
+              }
+          }
+
+          if ($changed) {
+              write_config("Regla legacy 'Servidores acceso completo' corregida (gateway WAN1_PRIMARY) via Ansible");
+              echo "FIXED";
+          } else {
+              echo "OK";
+          }
+      register: legacy_fix_result
+      changed_when: "'FIXED' in legacy_fix_result.stdout"
+
+    # ========================================================================
+    # NAT OUTBOUND - SERVIDORES
+    # Verifica que existan las reglas NAT para ambas WANs.
+    # Busca por fragmento de descripcion para tolerar variantes de nombre.
+    # ========================================================================
     - name: Verificar y crear NAT Outbound para VLAN Servidores
       tags: [nat, internet]
       pfsensible.core.pfsense_phpshell:
@@ -62,10 +123,12 @@
 
           foreach ($a_nat as $rule) {
               if (isset($rule['descr'])) {
-                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'wan')  { $found_wan1 = true; }
-                  if (strpos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'opt1') { $found_wan2 = true; }
+                  if (stripos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'wan')  { $found_wan1 = true; }
+                  if (stripos($rule['descr'], 'SERVIDORES') !== false && $rule['interface'] == 'opt1') { $found_wan2 = true; }
               }
           }
+
+          $created = false;
 
           if (!$found_wan1) {
               $a_nat[] = array(
@@ -79,6 +142,7 @@
                   'nonat'         => false,
                   'disabled'      => false
               );
+              $created = true;
           }
 
           if (!$found_wan2) {
@@ -93,12 +157,11 @@
                   'nonat'         => false,
                   'disabled'      => false
               );
+              $created = true;
           }
 
-          if (!$found_wan1 || !$found_wan2) {
+          if ($created) {
               write_config("Reglas NAT Outbound para Servidores agregadas via Ansible");
-              filter_configure();
-              clear_subsystem_dirty('natconf');
               echo "CREATED";
           } else {
               echo "EXISTS";
@@ -106,16 +169,26 @@
       register: nat_result
       changed_when: "'CREATED' in nat_result.stdout"
 
-    - name: Aplicar filtros finales
+    # ========================================================================
+    # APLICAR FILTROS - siempre, sin condicion
+    # No depende de changed_when para garantizar que el kernel de pf
+    # siempre refleje el estado actual de config.xml al finalizar.
+    # ========================================================================
+    - name: Aplicar filtros y NAT (siempre, sin condicion)
       tags: [filter, apply]
       pfsensible.core.pfsense_phpshell:
         cmd: |
+          require_once("/etc/inc/config.inc");
+          require_once("/etc/inc/util.inc");
           require_once("/etc/inc/filter.inc");
+
           filter_configure();
           clear_subsystem_dirty('filter');
           clear_subsystem_dirty('natconf');
-      when: firewall_result.changed or nat_result.changed
 
+    # ========================================================================
+    # RESUMEN
+    # ========================================================================
     - name: Resumen
       tags: [always, output]
       ansible.builtin.debug:
@@ -123,8 +196,17 @@
           - "=========================================="
           - "CONECTIVIDAD INTERNET - VLAN SERVIDORES"
           - "=========================================="
-          - "Host         : {{ hostname }} (Rol: {{ carp_role }})"
-          - "Regla Firewall: {{ 'CREADA' if firewall_result.changed else 'YA EXISTIA' }}"
-          - "Reglas NAT   : {{ 'CREADAS' if nat_result.changed else 'YA EXISTIAN' }}"
-          - "Red          : {{ servidores_network }} -> WAN IPs"
+          - "Host          : {{ hostname }} (Rol: {{ carp_role }})"
+          - "Regla FW      : {% if 'CREATED' in firewall_result.stdout %}CREADA{% elif 'UPDATED' in firewall_result.stdout %}ACTUALIZADA (gateway corregido){% else %}OK (ya existia con gateway){% endif %}"
+          - "Regla Legacy  : {{ 'CORREGIDA (gateway WAN1_PRIMARY agregado)' if legacy_fix_result.changed else 'OK' }}"
+          - "Reglas NAT    : {{ 'CREADAS' if nat_result.changed else 'YA EXISTIAN' }}"
+          - "Gateway       : WAN1_PRIMARY (forzado en regla de firewall)"
+          - "Red SERVIDORES: {{ servidores_network }}"
+          - "NAT WAN1 IP   : {{ wan1_address }}"
+          - "NAT WAN2 IP   : {{ wan2_address }}"
+          - "=========================================="
+          - "  VERIFICACION POST-DEPLOY:"
+          - "  1. pfctl -sr | grep servidores  (debe mostrar route-to WAN1)"
+          - "  2. ping 8.8.8.8 desde 192.168.10.5"
+          - "  3. Firewall > Logs: no debe aparecer Default Deny para SERVIDORES"
           - "=========================================="
