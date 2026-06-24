@@ -655,7 +655,6 @@
 
           write_config("HA XMLRPC Sync configurado via Ansible (solo Master)");
           filter_configure();
-      no_log: true
 
     # ========================================================================
     # APLICAR CONFIGURACION FINAL
