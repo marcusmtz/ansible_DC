@@ -65,6 +65,9 @@
       - "192.168.13.96"
       - "192.168.13.97"
 
+    sync_local_ip: "192.168.10.3"
+    sync_peer_ip: "192.168.10.2"
+
   tasks:
     - name: Instalar paquetes necesarios
       ansible.builtin.apt:
@@ -75,6 +78,8 @@
           - keepalived
           - vlan
           - isc-dhcp-relay
+          - conntrackd
+          - fping
         state: present
         update_cache: true
 
@@ -432,6 +437,19 @@
       register: input_icmp
       changed_when: "'ADDED' in input_icmp.stdout"
 
+    - name: Permitir sync conntrackd entre nodos (UDP 3780 en VLAN10)
+      ansible.builtin.shell: |
+        if iptables -C INPUT -i {{ trunk_interface }}.10 -p udp --dport 3780 -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i {{ trunk_interface }}.10 -p udp --dport 3780 -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: conntrackd_sync_rule
+      changed_when: "'ADDED' in conntrackd_sync_rule.stdout"
+
     - name: Establecer politicas por defecto (INPUT DROP, FORWARD DROP)
       ansible.builtin.shell: |
         changed=0
@@ -467,41 +485,141 @@
         enabled: true
         state: started
 
-    # --- ECMP ---
-    - name: Configurar ECMP multipath routing
-      ansible.builtin.shell: |
-        ip route replace default scope global \
-          nexthop via {{ wan1_gateway }} dev {{ wan_interface }} weight 1 \
-          nexthop via {{ wan2_gateway }} dev {{ wan2_interface }} weight 1
-      args:
-        executable: /bin/bash
+    # --- Policy Routing (WAN1_PRIMARY: Servidores+Admin | WAN2_PRIMARY: TI+Ventas) ---
+    - name: Registrar tablas de routing personalizadas en rt_tables
+      ansible.builtin.lineinfile:
+        path: /etc/iproute2/rt_tables
+        line: "{{ item }}"
+        state: present
+      loop:
+        - "101 wan1_primary"
+        - "102 wan2_primary"
 
-    - name: Crear servicio systemd para persistencia ECMP
+    - name: Crear script de setup de policy routing
       ansible.builtin.copy:
-        dest: /etc/systemd/system/ecmp-loadbalance.service
+        dest: /usr/local/bin/policy-routing-setup.sh
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          # Configura ip rules para policy routing por VLAN al arranque
+          # Servidores(10)+Administracion(20) -> WAN1 | TI(30)+Ventas(40) -> WAN2
+
+          # Limpiar rules previas para evitar duplicados
+          ip rule list | awk -F: '/wan[12]_primary/{print $1}' | while read prio; do
+            ip rule del priority "$prio" 2>/dev/null || true
+          done
+
+          ip rule add from 192.168.10.0/26 table wan1_primary priority 110
+          ip rule add from 192.168.20.0/25 table wan1_primary priority 120
+          ip rule add from 192.168.30.0/26 table wan2_primary priority 130
+          ip rule add from 192.168.40.0/25 table wan2_primary priority 140
+
+    - name: Crear script de failover WAN
+      ansible.builtin.copy:
+        dest: /usr/local/bin/wan-failover.sh
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          # Monitorea WANs y actualiza tablas de policy routing con failover automatico
+          WAN1_GW="{{ wan1_gateway }}"
+          WAN2_GW="{{ wan2_gateway }}"
+          WAN1_DEV="{{ wan_interface }}"
+          WAN2_DEV="{{ wan2_interface }}"
+
+          check_wan() {
+            fping -c 2 -t 2000 -I "$1" 8.8.8.8 >/dev/null 2>&1 || \
+            fping -c 2 -t 2000 -I "$1" 1.1.1.1 >/dev/null 2>&1
+          }
+
+          check_wan "$WAN1_DEV" && WAN1_UP=1 || WAN1_UP=0
+          check_wan "$WAN2_DEV" && WAN2_UP=1 || WAN2_UP=0
+
+          # Tabla wan1_primary: WAN1 preferida con failover a WAN2
+          if [ $WAN1_UP -eq 1 ]; then
+            ip route replace default via $WAN1_GW dev $WAN1_DEV table wan1_primary
+            logger -t wan-failover "wan1_primary: activo via WAN1 ($WAN1_GW)"
+          elif [ $WAN2_UP -eq 1 ]; then
+            ip route replace default via $WAN2_GW dev $WAN2_DEV table wan1_primary
+            logger -t wan-failover "wan1_primary: FAILOVER a WAN2 - WAN1 caida"
+          else
+            logger -t wan-failover "ALERTA: ambas WANs inaccesibles"
+          fi
+
+          # Tabla wan2_primary: WAN2 preferida con failover a WAN1
+          if [ $WAN2_UP -eq 1 ]; then
+            ip route replace default via $WAN2_GW dev $WAN2_DEV table wan2_primary
+            logger -t wan-failover "wan2_primary: activo via WAN2 ($WAN2_GW)"
+          elif [ $WAN1_UP -eq 1 ]; then
+            ip route replace default via $WAN1_GW dev $WAN1_DEV table wan2_primary
+            logger -t wan-failover "wan2_primary: FAILOVER a WAN1 - WAN2 caida"
+          fi
+
+    - name: Crear servicio systemd para policy routing
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/policy-routing.service
+        owner: root
+        group: root
+        mode: "0644"
         content: |
           [Unit]
-          Description=ECMP load balancing for dual WAN
+          Description=Policy routing por VLAN dual-WAN (WAN1_PRIMARY / WAN2_PRIMARY)
           After=network-online.target
           Wants=network-online.target
 
           [Service]
           Type=oneshot
-          ExecStart=/usr/sbin/ip route replace default scope global nexthop via {{ wan1_gateway }} dev {{ wan_interface }} weight 1 nexthop via {{ wan2_gateway }} dev {{ wan2_interface }} weight 1
+          ExecStart=/usr/local/bin/policy-routing-setup.sh
+          ExecStartPost=/usr/local/bin/wan-failover.sh
           RemainAfterExit=true
 
           [Install]
           WantedBy=multi-user.target
+
+    - name: Crear servicio wan-failover para el timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/wan-failover.service
         owner: root
         group: root
         mode: "0644"
+        content: |
+          [Unit]
+          Description=WAN health check y failover de policy routing
 
-    - name: Habilitar e iniciar servicio ECMP
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/wan-failover.sh
+
+    - name: Crear timer systemd para monitoreo WAN cada 30s
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/wan-failover.timer
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Monitoreo periodico de WANs para failover de policy routing
+
+          [Timer]
+          OnBootSec=60
+          OnUnitActiveSec=30
+          Unit=wan-failover.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Habilitar policy routing y failover WAN
       ansible.builtin.systemd:
-        name: ecmp-loadbalance
+        name: "{{ item }}"
         daemon_reload: true
         enabled: true
         state: started
+      loop:
+        - policy-routing.service
+        - wan-failover.timer
 
     # --- VRRP por VLAN ---
     - name: Configurar keepalived con una instancia por VLAN
@@ -518,6 +636,9 @@
               virtual_router_id {{ vlan.vrrp_id }}
               priority {{ vrrp_priority }}
               advert_int 1
+          {% if vlan.id == 10 %}
+              notify /usr/local/bin/conntrackd-notify.sh
+          {% endif %}
 
               authentication {
                   auth_type PASS
@@ -544,6 +665,90 @@
         executable: /bin/bash
       changed_when: false
 
+    # --- State Sync entre nodos (conntrackd) ---
+    - name: Crear script de notificacion conntrackd para keepalived
+      ansible.builtin.copy:
+        dest: /usr/local/bin/conntrackd-notify.sh
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          # Llamado por keepalived al cambiar estado VRRP de VLAN10
+          # $1=GROUP|INSTANCE  $2=nombre_instancia  $3=MASTER|BACKUP|FAULT
+          TYPE=$3
+          case "$TYPE" in
+            MASTER)
+              /usr/sbin/conntrackd -c
+              /usr/sbin/conntrackd -f
+              /usr/sbin/conntrackd -R
+              /usr/sbin/conntrackd -B
+              ;;
+            BACKUP)
+              /usr/sbin/conntrackd -n
+              ;;
+            FAULT)
+              /usr/sbin/conntrackd -f
+              ;;
+          esac
+          exit 0
+
+    - name: Escribir configuracion conntrackd
+      ansible.builtin.copy:
+        dest: /etc/conntrackd/conntrackd.conf
+        owner: root
+        group: root
+        mode: "0640"
+        content: |
+          Sync {
+            Mode FTFW {
+              DisableExternalCache Off
+              CommitTimeout 1800
+              PurgeTimeout 5
+            }
+            UDP {
+              IPv4_address {{ sync_local_ip }}
+              IPv4_Destination_Address {{ sync_peer_ip }}
+              Port 3780
+              Interface {{ trunk_interface }}.10
+              SndSocketBuffer 1249280
+              RcvSocketBuffer 1249280
+              Checksum on
+            }
+          }
+          General {
+            Nice -20
+            HashSize 32768
+            HashLimit 131072
+            LogFile /var/log/conntrackd.log
+            Syslog on
+            LockFile /var/lock/conntrack.lock
+            UNIX {
+              Path /var/run/conntrackd.ctl
+              Backlog 20
+            }
+            NetlinkBufferSize 262144
+            NetlinkBufferSizeMaxGrowth 655360
+            Filter From Userspace {
+              Protocol Accept {
+                TCP
+                UDP
+                ICMP
+              }
+              Address Ignore {
+                IPv4_address 127.0.0.1
+                IPv4_address {{ sync_local_ip }}
+              }
+            }
+          }
+      notify: Restart conntrackd
+
+    - name: Habilitar e iniciar conntrackd
+      ansible.builtin.systemd:
+        name: conntrackd
+        enabled: true
+        state: started
+
   handlers:
     - name: Apply netplan
       ansible.builtin.shell: netplan generate && netplan apply
@@ -559,4 +764,9 @@
     - name: Restart isc-dhcp-relay
       ansible.builtin.systemd:
         name: isc-dhcp-relay
+        state: restarted
+
+    - name: Restart conntrackd
+      ansible.builtin.systemd:
+        name: conntrackd
         state: restarted
