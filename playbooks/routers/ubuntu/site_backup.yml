@@ -119,6 +119,10 @@
                 addresses: [{{ wan1_address }}]
                 nameservers:
                   addresses: {{ nameservers | to_json }}
+                routes:
+                  - to: default
+                    via: {{ wan1_gateway }}
+                    metric: 100
               {{ wan2_interface }}:
                 dhcp4: false
                 addresses: [{{ wan2_address }}]
