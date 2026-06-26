@@ -475,7 +475,7 @@
         mode: "0644"
         content: |
           SERVERS="{{ dhcp_server }}"
-          INTERFACES="{% for vlan in vlans if vlan.id != 10 %}{{ trunk_interface }}.{{ vlan.id }}{% if not loop.last %} {% endif %}{% endfor %}"
+          INTERFACES="{% for vlan in vlans %}{{ trunk_interface }}.{{ vlan.id }}{% if not loop.last %} {% endif %}{% endfor %}"
           OPTIONS=""
       notify: Restart isc-dhcp-relay
 
