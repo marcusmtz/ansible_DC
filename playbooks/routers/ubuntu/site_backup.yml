@@ -424,6 +424,32 @@
       register: input_ssh
       changed_when: "'ADDED' in input_ssh.stdout"
 
+    - name: Permitir SSH desde TI (VLAN30)
+      ansible.builtin.shell: |
+        if iptables -C INPUT -i {{ trunk_interface }}.30 -p tcp --dport 22 -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i {{ trunk_interface }}.30 -p tcp --dport 22 -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: input_ssh_vlan30
+      changed_when: "'ADDED' in input_ssh_vlan30.stdout"
+
+    - name: Permitir SSH desde red de gestion WAN (172.17.25.0/24)
+      ansible.builtin.shell: |
+        if iptables -C INPUT -i {{ wan_interface }} -s 172.17.25.0/24 -p tcp --dport 22 -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i {{ wan_interface }} -s 172.17.25.0/24 -p tcp --dport 22 -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: input_ssh_wan
+      changed_when: "'ADDED' in input_ssh_wan.stdout"
+
     - name: Permitir ICMP ping desde redes internas en INPUT
       ansible.builtin.shell: |
         if iptables -C INPUT -s 192.168.0.0/16 -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null; then
@@ -436,6 +462,19 @@
         executable: /bin/bash
       register: input_icmp
       changed_when: "'ADDED' in input_icmp.stdout"
+
+    - name: Permitir ICMP ping desde red de gestion WAN (172.17.25.0/24)
+      ansible.builtin.shell: |
+        if iptables -C INPUT -i {{ wan_interface }} -s 172.17.25.0/24 -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null; then
+          echo "EXISTS"
+        else
+          iptables -A INPUT -i {{ wan_interface }} -s 172.17.25.0/24 -p icmp --icmp-type echo-request -j ACCEPT
+          echo "ADDED"
+        fi
+      args:
+        executable: /bin/bash
+      register: input_icmp_wan
+      changed_when: "'ADDED' in input_icmp_wan.stdout"
 
     - name: Permitir sync conntrackd entre nodos (UDP 3780 en VLAN10)
       ansible.builtin.shell: |
