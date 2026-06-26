@@ -5,7 +5,7 @@
 
   vars:
     wan_interface: ens34
-    wan1_address: "172.17.25.66/24"
+    wan1_address: "172.17.25.87/24"
     wan1_gateway: "172.17.25.121"
     wan2_interface: ens35
     wan2_address: "168.17.25.3/29"
@@ -94,6 +94,14 @@
         line: 8021q
         state: present
 
+    - name: Deshabilitar cloud-init network management
+      ansible.builtin.copy:
+        dest: /etc/cloud/cloud.cfg.d/99-disable-network.cfg
+        content: "network: {config: disabled}\n"
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Escribir netplan con trunk y subinterfaces VLAN
       ansible.builtin.copy:
         dest: "{{ netplan_file }}"
@@ -124,6 +132,12 @@
                 dhcp4: false
                 addresses: [{{ vlan.address }}]
           {% endfor %}
+      notify: Apply netplan
+
+    - name: Eliminar configuracion de cloud-init network
+      ansible.builtin.file:
+        path: /etc/netplan/50-cloud-init.yaml
+        state: absent
       notify: Apply netplan
 
     - name: Forzar aplicacion de netplan antes de continuar
