@@ -117,10 +117,13 @@
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Instalar expect para manejo de dialogo inicial de iRedMail
-          ansible.builtin.apt:
-            name: expect
-            state: present
+        - name: Crear dialog falso para instalacion silenciosa
+          ansible.builtin.copy:
+            dest: /usr/local/bin/dialog
+            mode: '0755'
+            content: |
+              #!/bin/bash
+              exit 0
 
         - name: Descargar iRedMail desde GitHub
           ansible.builtin.get_url:
@@ -176,24 +179,25 @@
           no_log: true
           changed_when: true
 
-        - name: Ejecutar instalador iRedMail (no interactivo con expect)
-          ansible.builtin.shell: |
-            expect -c '
-            set timeout 7200
-            spawn bash /opt/iRedMail-{{ iredmail_version }}/iRedMail.sh
-            expect {
-              -re "Next|next|NEXT" { send "\n"; exp_continue }
-              eof
-            }
-            '
+        - name: Ejecutar instalador iRedMail (no interactivo)
+          ansible.builtin.shell:
+            cmd: "bash iRedMail.sh"
+            chdir: "/opt/iRedMail-{{ iredmail_version }}"
           environment:
             DEBIAN_FRONTEND: noninteractive
             IREDMAIL_VERSION_CHECK: "NO"
             CHECK_NEW_VERSION: "NO"
+          args:
+            creates: /etc/postfix/main.cf
           register: iredmail_install
           async: 7200
           poll: 60
           changed_when: true
+
+        - name: Eliminar dialog falso tras instalacion
+          ansible.builtin.file:
+            path: /usr/local/bin/dialog
+            state: absent
 
         - name: Mostrar resultado de instalacion
           ansible.builtin.debug:
