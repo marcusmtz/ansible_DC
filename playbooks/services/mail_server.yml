@@ -104,9 +104,9 @@
       register: iredmail_latest
       changed_when: false
 
-    - name: Registrar version dinamica
+    - name: Registrar version dinamica sin prefijo v
       ansible.builtin.set_fact:
-        iredmail_version: "{{ iredmail_latest.stdout | trim }}"
+        iredmail_version: "{{ iredmail_latest.stdout | trim | replace('v', '') }}"
 
     - name: Instalar iRedMail con proteccion de firewall
       block:
@@ -116,7 +116,7 @@
 
         - name: Descargar iRedMail (Forzando IPv4 vía curl)
           ansible.builtin.shell:
-            cmd: "curl -4 -L -s -S https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz -o /opt/iredmail.tar.gz"
+            cmd: "curl -4 -L -s -S https://github.com/iredmail/iRedMail/archive/refs/tags/v{{ iredmail_version }}.tar.gz -o /opt/iredmail.tar.gz"
           register: download_result
           until: download_result.rc == 0
           retries: 5
@@ -189,6 +189,7 @@
           environment:
             DEBIAN_FRONTEND: noninteractive
             IREDMAIL_VERSION_CHECK: "NO"
+            CHECK_NEW_VERSION: "NO"
           args:
             creates: /etc/postfix/main.cf
           register: iredmail_install
