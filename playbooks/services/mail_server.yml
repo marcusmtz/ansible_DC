@@ -97,22 +97,22 @@
         name: systemd-resolved
         state: restarted
 
+    - name: Obtener ultima version de iRedMail desde GitHub
+      ansible.builtin.shell: |
+        curl -s https://api.github.com/repos/iredmail/iRedMail/releases/latest \
+          | grep '"tag_name"' | cut -d'"' -f4
+      register: iredmail_latest
+      changed_when: false
+
+    - name: Registrar version dinamica
+      ansible.builtin.set_fact:
+        iredmail_version: "{{ iredmail_latest.stdout | trim }}"
+
     - name: Instalar iRedMail con proteccion de firewall
       block:
         - name: Deshabilitar UFW temporalmente para permitir descargas
           ansible.builtin.ufw:
             state: disabled
-
-        - name: Obtener ultima version de iRedMail desde GitHub
-          ansible.builtin.shell: |
-            curl -s https://api.github.com/repos/iredmail/iRedMail/releases/latest \
-              | grep '"tag_name"' | cut -d'"' -f4
-          register: iredmail_latest
-          changed_when: false
-
-        - name: Registrar version dinamica
-          ansible.builtin.set_fact:
-            iredmail_version: "{{ iredmail_latest.stdout | trim }}"
 
         - name: Descargar iRedMail (Forzando IPv4 vía curl)
           ansible.builtin.shell:
