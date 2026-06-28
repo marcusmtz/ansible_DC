@@ -316,16 +316,24 @@
     # =========================================================================
     # IMPORTAR ESQUEMA VMAIL
     # =========================================================================
-    - name: Importar esquema vmail si la tabla domain no existe
+    - name: Importar esquema vmail (tolerante a objetos ya existentes)
       ansible.builtin.shell: |
-        DOMAIN_TABLE=$(mysql -u root -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -sN -e \
-          "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail' AND table_name='domain';" 2>/dev/null || echo "0")
-        if [ "$DOMAIN_TABLE" -eq 0 ]; then
-          mysql -u root -p'{{ iredmail_admin_password }}' -h 127.0.0.1 --force < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql || true
-          mysql -u root -p'{{ iredmail_admin_password }}' -h 127.0.0.1 --force vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql || true
-        fi
+        mysql -u root -p'{{ iredmail_admin_password }}' --force \
+          < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql
+        mysql -u root -p'{{ iredmail_admin_password }}' --force vmail \
+          < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql
       no_log: true
       changed_when: false
+      ignore_errors: true
+
+    - name: Verificar que la tabla domain existe tras el import
+      ansible.builtin.shell: |
+        mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -sN -e \
+          "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail' AND table_name='domain';"
+      no_log: true
+      changed_when: false
+      register: domain_table_check
+      failed_when: domain_table_check.stdout | trim == "0"
 
     - name: Instalar nginx si no esta presente
       ansible.builtin.apt:
