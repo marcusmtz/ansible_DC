@@ -115,10 +115,11 @@
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Obtener ultima version estable de iRedMail desde GitHub
+        - name: Obtener ultima version estable de iRedMail (via redirect)
           ansible.builtin.shell: |
-            curl -s -4 -L https://api.github.com/repos/iredmail/iRedMail/releases/latest \
-              | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v\r\n '
+            curl -s -4 -L -o /dev/null -w "%{url_effective}" \
+              https://github.com/iredmail/iRedMail/releases/latest \
+              | sed 's|.*/tag/||; s/^v//'
           register: iredmail_latest
           changed_when: false
 
@@ -126,7 +127,8 @@
           ansible.builtin.assert:
             that:
               - iredmail_latest.stdout | trim | length > 0
-            fail_msg: "No se pudo obtener la version de iRedMail. Verifica conectividad a api.github.com"
+              - iredmail_latest.stdout | trim | regex_search('^[0-9]+\.[0-9]+')
+            fail_msg: "No se pudo obtener la version de iRedMail. stdout: '{{ iredmail_latest.stdout }}'"
 
         - name: Registrar version obtenida
           ansible.builtin.set_fact:
