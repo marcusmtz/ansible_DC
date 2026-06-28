@@ -301,7 +301,6 @@
           INSERT IGNORE INTO domain (domain, transport, active, created)
           VALUES ('{{ domain_mail }}', 'dovecot', 1, NOW());
         "
-      no_log: true
       changed_when: false
 
     - name: Crear buzon de correo para cada usuario AD
