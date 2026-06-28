@@ -117,18 +117,25 @@
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Obtener ultima version estable de iRedMail
+        - name: Obtener ultima version estable de iRedMail (via tags API)
           ansible.builtin.shell: |
             python3 - <<'PYEOF'
-            import urllib.request, json, sys
+            import urllib.request, json, sys, re
             req = urllib.request.Request(
-                'https://api.github.com/repos/iredmail/iRedMail/releases/latest',
+                'https://api.github.com/repos/iredmail/iRedMail/tags',
                 headers={'User-Agent': 'Ansible/iRedMail-Deploy'}
             )
             try:
                 with urllib.request.urlopen(req, timeout=15) as r:
-                    data = json.loads(r.read().decode())
-                    print(data['tag_name'].lstrip('v'), end='')
+                    tags = json.loads(r.read().decode())
+                    # Filtrar solo tags que sean version semantica (ej: 1.7.1 o v1.7.1)
+                    for tag in tags:
+                        name = tag['name'].lstrip('v')
+                        if re.match(r'^\d+\.\d+', name):
+                            print(name, end='')
+                            sys.exit(0)
+                    sys.stderr.write('No se encontro ninguna version en los tags\n')
+                    sys.exit(1)
             except Exception as e:
                 sys.stderr.write(str(e) + '\n')
                 sys.exit(1)
