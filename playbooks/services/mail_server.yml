@@ -295,6 +295,22 @@
           ansible.builtin.ufw:
             state: enabled
 
+    - name: Importar esquema vmail si las tablas no existen
+      ansible.builtin.shell: |
+        TABLE_COUNT=$(mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail';")
+        if [ "$TABLE_COUNT" -eq 0 ]; then
+          mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql
+          mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql
+        fi
+      no_log: true
+      changed_when: false
+
+    - name: Asegurar que nginx este activo
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: true
+
     - name: Asegurar que el dominio existe en iRedMail
       ansible.builtin.shell: |
         mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -e "
