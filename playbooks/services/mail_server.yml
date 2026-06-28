@@ -14,11 +14,10 @@
     ldap_base_dn: "DC=norcom,DC=internal"
     ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
     
-    # === ¡DEFINIR CONTRASEÑAS AQUÍ PARA EVITAR FALLOS DE ANSIBLE! ===
+    iredmail_version: "1.8.2"
     iredmail_admin_password: "PasswordSeguroMySQL2026!"
     domain_admin_password: "PasswordDelAdministradorAD"
     
-    iredmail_version: ""
     mail_users:
       - username: admin1
         display_name: "Admin Uno"
@@ -83,27 +82,7 @@
         line: "{{ dns_secondary_ip }} dns2.norcom.internal dns2"
 
     # =========================================================================
-    # CONSULTA SEGURA DE VERSIÓN (Módulo Nativo de Ansible)
-    # =========================================================================
-    - name: Obtener ultima version de iRedMail desde la API de GitHub
-      ansible.builtin.uri:
-        url: https://api.github.com/repos/iredmail/iRedMail/releases/latest
-        return_content: true
-        status_code: 200
-      register: iredmail_api_response
-
-    - name: Registrar version sin prefijo v (Usa regex seguro)
-      ansible.builtin.set_fact:
-        iredmail_version: "{{ iredmail_api_response.json.tag_name | regex_replace('^v', '') | trim }}"
-
-    - name: Validar que se obtuvo la version
-      ansible.builtin.assert:
-        that:
-          - iredmail_version | length > 0
-        fail_msg: "No se pudo procesar la version de iRedMail desde el JSON de GitHub."
-
-    # =========================================================================
-    # CAMBIO DE DNS (Una vez descargada la meta de GitHub)
+    # CONFIGURACIÓN DNS ANTES DE LA INSTALACIÓN
     # =========================================================================
     - name: Crear directorio drop-in para systemd-resolved
       ansible.builtin.file:
