@@ -13,32 +13,32 @@
       - name: admin1
         firstname: Admin
         surname: Uno
-        password: "Adm1n@Norcom2026"
+        password: "Adm1n#Nrc@2026$Secure!"
         group: Administracion
       - name: admin2
         firstname: Admin
         surname: Dos
-        password: "Adm2n@Norcom2026"
+        password: "Adm2n#Nrc@2026$Secure!"
         group: Administracion
       - name: ti1
         firstname: TI
         surname: Uno
-        password: "T1tech@Norcom2026"
+        password: "T1tech#Nrc@2026$Secure!"
         group: TI
       - name: ti2
         firstname: TI
         surname: Dos
-        password: "T2tech@Norcom2026"
+        password: "T2tech#Nrc@2026$Secure!"
         group: TI
       - name: ventas1
         firstname: Ventas
         surname: Uno
-        password: "V3ntas@Norcom2026"
+        password: "V3ntas#Nrc@2026$Secure!"
         group: Ventas
       - name: ventas2
         firstname: Ventas
         surname: Dos
-        password: "V4ntas@Norcom2026"
+        password: "V4ntas#Nrc@2026$Secure!"
         group: Ventas
 
   tasks:
