@@ -10,7 +10,7 @@
     mail_ip: "192.168.10.9"
     dns_master_ip: "192.168.10.5"
     dns_secondary_ip: "192.168.10.6"
-    iredmail_version: "1.7.2"
+    iredmail_version: ""
     ldap_server: "192.168.10.5"
 
     ldap_base_dn: "DC=norcom,DC=internal"
@@ -103,6 +103,17 @@
           ansible.builtin.ufw:
             state: disabled
 
+        - name: Obtener ultima version de iRedMail desde GitHub
+          ansible.builtin.shell: |
+            curl -s https://api.github.com/repos/iredmail/iRedMail/releases/latest \
+              | grep '"tag_name"' | cut -d'"' -f4
+          register: iredmail_latest
+          changed_when: false
+
+        - name: Registrar version dinamica
+          ansible.builtin.set_fact:
+            iredmail_version: "{{ iredmail_latest.stdout | trim }}"
+
         - name: Descargar iRedMail (Forzando IPv4 vía curl)
           ansible.builtin.shell:
             cmd: "curl -4 -L -s -S https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz -o /opt/iredmail.tar.gz"
@@ -177,6 +188,7 @@
             chdir: "/opt/iRedMail-{{ iredmail_version }}"
           environment:
             DEBIAN_FRONTEND: noninteractive
+            IREDMAIL_VERSION_CHECK: "NO"
           args:
             creates: /etc/postfix/main.cf
           register: iredmail_install
