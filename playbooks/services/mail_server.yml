@@ -139,6 +139,11 @@
             remote_src: true
             creates: "/opt/iRedMail-{{ iredmail_version }}"
 
+        - name: Eliminar config previo incompleto si existe
+          ansible.builtin.file:
+            path: "/opt/iRedMail-{{ iredmail_version }}/config"
+            state: absent
+
         - name: Crear archivo de respuestas para instalacion no interactiva
           ansible.builtin.shell: |
             cat > "/opt/iRedMail-{{ iredmail_version }}/config" << EOF
@@ -170,12 +175,11 @@
             export USE_FAIL2BAN='YES'
             export USE_NETDATA='YES'
             export USE_SOGO='NO'
+            export INITIALIZE_GROUP_MEMBERS='YES'
             EOF
             chmod 600 "/opt/iRedMail-{{ iredmail_version }}/config"
           environment:
             IREDMAIL_PASS: "{{ iredmail_admin_password }}"
-          args:
-            creates: "/opt/iRedMail-{{ iredmail_version }}/config"
           no_log: true
           changed_when: true
 
