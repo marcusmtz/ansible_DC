@@ -15,7 +15,7 @@
     ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
     
     # === VARIABLES EN TEXTO PLANO FIJAS ===
-    iredmail_version: ""
+    iredmail_version: "1.8.2"
     iredmail_admin_password: "PasswordSeguroMySQL2026!"
     domain_admin_password: "PasswordDelAdministradorAD"
     
@@ -117,49 +117,9 @@
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Obtener ultima version estable de iRedMail (via tags API)
-          ansible.builtin.shell: |
-            python3 - <<'PYEOF'
-            import urllib.request, json, sys, re
-            req = urllib.request.Request(
-                'https://api.github.com/repos/iredmail/iRedMail/tags',
-                headers={'User-Agent': 'Ansible/iRedMail-Deploy'}
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    tags = json.loads(r.read().decode())
-                    # Filtrar solo tags que sean version semantica (ej: 1.7.1 o v1.7.1)
-                    for tag in tags:
-                        name = tag['name'].lstrip('v')
-                        if re.match(r'^\d+\.\d+', name):
-                            print(name, end='')
-                            sys.exit(0)
-                    sys.stderr.write('No se encontro ninguna version en los tags\n')
-                    sys.exit(1)
-            except Exception as e:
-                sys.stderr.write(str(e) + '\n')
-                sys.exit(1)
-            PYEOF
-          register: iredmail_latest
-          changed_when: false
-
-        - name: Validar que se obtuvo la version
-          ansible.builtin.assert:
-            that:
-              - iredmail_latest.stdout | trim | length > 0
-            fail_msg: "No se pudo obtener la version de iRedMail. stdout: '{{ iredmail_latest.stdout }}'"
-
-        - name: Registrar version obtenida
-          ansible.builtin.set_fact:
-            iredmail_version: "{{ iredmail_latest.stdout | trim }}"
-
-        - name: Mostrar version a instalar
-          ansible.builtin.debug:
-            msg: "Instalando iRedMail version: {{ iredmail_version }}"
-
-        - name: Descargar iRedMail desde GitHub releases
+        - name: Descargar iRedMail desde GitHub
           ansible.builtin.get_url:
-            url: "https://github.com/iredmail/iRedMail/archive/refs/tags/v{{ iredmail_version }}.tar.gz"
+            url: "https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz"
             dest: "/opt/iredmail-{{ iredmail_version }}.tar.gz"
             mode: '0644'
             force: false
