@@ -330,6 +330,12 @@
         fi
       changed_when: false
 
+    - name: Instalar nginx si no esta presente
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: false
+
     - name: Asegurar que nginx este activo
       ansible.builtin.systemd:
         name: nginx
