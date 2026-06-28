@@ -323,10 +323,10 @@
     - name: Importar esquema vmail si la tabla domain no existe
       ansible.builtin.shell: |
         DOMAIN_TABLE=$(mysql vmail -sN -e \
-          "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail' AND table_name='domain';")
+          "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail' AND table_name='domain';" 2>/dev/null || echo "0")
         if [ "$DOMAIN_TABLE" -eq 0 ]; then
-          mysql < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql
-          mysql vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql
+          mysql --force < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql || true
+          mysql --force vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql || true
         fi
       changed_when: false
 
