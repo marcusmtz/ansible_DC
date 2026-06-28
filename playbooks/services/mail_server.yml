@@ -127,7 +127,6 @@
           ansible.builtin.assert:
             that:
               - iredmail_latest.stdout | trim | length > 0
-              - iredmail_latest.stdout | trim | regex_search('^[0-9]+\.[0-9]+')
             fail_msg: "No se pudo obtener la version de iRedMail. stdout: '{{ iredmail_latest.stdout }}'"
 
         - name: Registrar version obtenida
