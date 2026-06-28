@@ -177,7 +177,7 @@
               export USE_FAIL2BAN='YES'
               export USE_NETDATA='YES'
               export USE_SOGO='NO'
-              export INITIALIZE_GROUP_MEMBERS='YES'
+              #EOF
           no_log: true
 
         - name: Ejecutar instalador iRedMail (no interactivo)
@@ -188,6 +188,7 @@
             DEBIAN_FRONTEND: noninteractive
             IREDMAIL_VERSION_CHECK: "NO"
             CHECK_NEW_VERSION: "NO"
+            AUTO_USE_EXISTING_CONFIG_FILE: "y"
           args:
             creates: /etc/postfix/main.cf
           register: iredmail_install
