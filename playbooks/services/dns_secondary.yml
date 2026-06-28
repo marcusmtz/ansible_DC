@@ -42,7 +42,7 @@
               listen-on { 127.0.0.1; {{ dns_listen_ip }}; };
               listen-on-v6 { any; };
 
-              dnssec-validation auto;
+              dnssec-validation no;
           };
       notify: Restart bind9
 

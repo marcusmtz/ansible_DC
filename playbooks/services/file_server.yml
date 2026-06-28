@@ -29,8 +29,6 @@
           - libnss-winbind
           - krb5-user
           - realmd
-          - sssd
-          - sssd-tools
           - adcli
         state: present
         update_cache: true
@@ -47,6 +45,15 @@
         executable: /bin/bash
       register: realm_join
       changed_when: "'JOINED' in realm_join.stdout"
+
+    - name: Crear carpetas de recursos compartidos
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: "{{ domain_upper }}\\{{ item.group }}"
+        mode: "0770"
+      loop: "{{ smb_shares }}"
 
     - name: Agregar winbind a nsswitch passwd
       ansible.builtin.lineinfile:
@@ -91,21 +98,12 @@
               browseable = yes
               read only = no
               guest ok = no
-              valid users = @"{{ domain_upper }}\{{ share.group }}"
+              valid users = @{{ share.group }}
               create mask = 0660
               directory mask = 0770
 
           {% endfor %}
       notify: Restart samba
-
-    - name: Crear carpetas de recursos compartidos
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0770"
-      loop: "{{ smb_shares }}"
 
     - name: Validar configuracion de Samba
       ansible.builtin.command: testparm -s

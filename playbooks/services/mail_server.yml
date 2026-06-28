@@ -76,9 +76,7 @@
           [Resolve]
           DNS={{ dns_master_ip }} {{ dns_secondary_ip }} 8.8.8.8
           Domains={{ domain_mail }}
-      notify: Reiniciar systemd-resolved
-
-    - name: Forzar reinicio de DNS inmediato
+    - name: Reiniciar systemd-resolved
       ansible.builtin.systemd:
         name: systemd-resolved
         state: restarted
@@ -159,7 +157,7 @@
 
         - name: Ejecutar instalador iRedMail (no interactivo)
           ansible.builtin.shell:
-            cmd: "printf 'y\n' | bash iRedMail.sh"
+            cmd: "yes | bash iRedMail.sh"
             chdir: "/opt/iRedMail-{{ iredmail_version }}"
           environment:
             DEBIAN_FRONTEND: noninteractive
@@ -171,6 +169,11 @@
         - name: Mostrar resultado de instalacion
           ansible.builtin.debug:
             var: iredmail_install.stdout_lines
+          when: iredmail_install.changed
+
+        - name: Reiniciar tras instalacion iRedMail
+          ansible.builtin.reboot:
+            reboot_timeout: 600
           when: iredmail_install.changed
 
       always:
@@ -238,8 +241,9 @@
           ansible.builtin.ufw:
             state: enabled
 
-  handlers:
-    - name: Reiniciar systemd-resolved
-      ansible.builtin.systemd:
-        name: systemd-resolved
-        state: restarted
+    - name: Advertencia registros DNS
+      ansible.builtin.debug:
+        msg:
+          - "IMPORTANTE: Crear manualmente en el DC Windows los siguientes registros DNS:"
+          - "  - A record:  mail.norcom.internal -> {{ mail_ip }}"
+          - "  - MX record: norcom.internal -> mail.norcom.internal (prioridad 10)"
