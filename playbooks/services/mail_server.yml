@@ -111,6 +111,21 @@
     # =========================================================================
     # PROCESO DE INSTALACIÓN DE IREDMAIL
     # =========================================================================
+    # PRE-INSTALAR MARIADB Y FIJAR PASSWORD ROOT ANTES DE iRedMail
+    # =========================================================================
+    - name: Pre-instalar MariaDB antes de iRedMail
+      ansible.builtin.apt:
+        name: mariadb-server
+        state: present
+
+    - name: Fijar password root MySQL via socket antes de que iRedMail lo modifique
+      ansible.builtin.shell: |
+        mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ iredmail_admin_password }}';"
+      no_log: true
+      changed_when: true
+      ignore_errors: true
+
+    # =========================================================================
     - name: Instalar iRedMail con proteccion de firewall
       block:
         - name: Deshabilitar UFW temporalmente para permitir descargas
@@ -298,36 +313,18 @@
     # =========================================================================
     # RESTAURAR AUTH ROOT MYSQL (iRedMail puede romper socket auth)
     # =========================================================================
-    - name: Restaurar autenticacion unix_socket para root via skip-grant-tables
-      ansible.builtin.shell: |
-        systemctl stop mariadb
-        mysqld_safe --skip-grant-tables --skip-networking &
-        SAFE_PID=$!
-        sleep 10
-        mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket; FLUSH PRIVILEGES;" || true
-        kill $SAFE_PID 2>/dev/null || true
-        kill $(cat /var/run/mysqld/mysqld.pid 2>/dev/null) 2>/dev/null || true
-        sleep 3
-        systemctl start mariadb
-        sleep 5
-      changed_when: true
-
-    - name: Esperar MariaDB tras reinicio
-      ansible.builtin.wait_for:
-        path: /var/run/mysqld/mysqld.sock
-        timeout: 30
-
     # =========================================================================
     # IMPORTAR ESQUEMA VMAIL
     # =========================================================================
     - name: Importar esquema vmail si la tabla domain no existe
       ansible.builtin.shell: |
-        DOMAIN_TABLE=$(mysql vmail -sN -e \
+        DOMAIN_TABLE=$(mysql -u root -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -sN -e \
           "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail' AND table_name='domain';" 2>/dev/null || echo "0")
         if [ "$DOMAIN_TABLE" -eq 0 ]; then
-          mysql --force < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql || true
-          mysql --force vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql || true
+          mysql -u root -p'{{ iredmail_admin_password }}' -h 127.0.0.1 --force < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql || true
+          mysql -u root -p'{{ iredmail_admin_password }}' -h 127.0.0.1 --force vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql || true
         fi
+      no_log: true
       changed_when: false
 
     - name: Instalar nginx si no esta presente
