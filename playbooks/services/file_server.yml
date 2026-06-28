@@ -50,7 +50,7 @@
         path: "{{ item.path }}"
         state: directory
         owner: root
-        group: "{{ domain_upper }}\\{{ item.group }}"
+        group: "{{ item.group }}@{{ domain }}"
         mode: "0770"
       loop: "{{ smb_shares }}"
 
