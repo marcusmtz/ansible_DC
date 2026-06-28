@@ -17,7 +17,6 @@
     domain: norcom.internal
     domain_upper: NORCOM
     domain_admin: Administrador
-    domain_admin_password: "{{ domain_admin_password }}"
 
   tasks:
     - name: Instalar paquetes necesarios
