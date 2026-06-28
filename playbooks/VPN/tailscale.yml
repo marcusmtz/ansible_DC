@@ -1,0 +1,103 @@
+---
+- name: Configurar Tailscale VPN en Ubuntu Server 24.04
+  hosts: ubuntu_vpn
+  become: true
+
+  vars:
+    tailscale_authkey: "{{ vault_tailscale_authkey }}"
+    tailscale_args: "--advertise-exit-node"
+    tailscale_accept_dns: true
+    tailscale_accept_routes: true
+
+  tasks:
+    - name: Actualizar cache de paquetes
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Instalar dependencias previas
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ca-certificates
+          - gnupg
+        state: present
+
+    - name: Crear directorio para keyrings
+      ansible.builtin.file:
+        path: /usr/share/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Descargar clave GPG de Tailscale
+      ansible.builtin.shell: |
+        curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg \
+          | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+      args:
+        creates: /usr/share/keyrings/tailscale-archive-keyring.gpg
+      changed_when: false
+
+    - name: Agregar repositorio de Tailscale
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/tailscale.list
+        mode: '0644'
+        content: |
+          deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main
+
+    - name: Actualizar cache tras agregar repositorio
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Instalar Tailscale
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+
+    - name: Habilitar e iniciar servicio tailscaled
+      ansible.builtin.systemd:
+        name: tailscaled
+        enabled: true
+        state: started
+
+    - name: Activar IPv4 forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        state: present
+        reload: true
+
+    - name: Activar IPv6 forwarding
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.all.forwarding
+        value: "1"
+        state: present
+        reload: true
+
+    - name: Autenticar y conectar al nodo Tailscale
+      ansible.builtin.shell: |
+        tailscale up \
+          --authkey={{ tailscale_authkey }} \
+          {% if tailscale_accept_dns %}--accept-dns \{% endif %}
+          {% if tailscale_accept_routes %}--accept-routes \{% endif %}
+          {{ tailscale_args }}
+      no_log: true
+      register: tailscale_up
+      changed_when: tailscale_up.rc == 0
+
+    - name: Verificar estado de Tailscale
+      ansible.builtin.command: tailscale status
+      register: tailscale_status
+      changed_when: false
+
+    - name: Mostrar estado de Tailscale
+      ansible.builtin.debug:
+        var: tailscale_status.stdout_lines
+
+    - name: Obtener IP de Tailscale asignada
+      ansible.builtin.command: tailscale ip -4
+      register: tailscale_ip
+      changed_when: false
+
+    - name: Mostrar IP de Tailscale
+      ansible.builtin.debug:
+        msg: "IP Tailscale asignada: {{ tailscale_ip.stdout }}"

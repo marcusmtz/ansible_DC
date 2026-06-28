@@ -1,0 +1,106 @@
+---
+- name: Configurar IP estática en Ubuntu Server 24.04 sin cortar conexión SSH
+  hosts: ubuntu_vpn
+  become: true
+
+  vars:
+    # IP estática = misma que DHCP actual para no perder conectividad
+    static_ip: "172.17.25.58"
+    prefix: "24"
+    gateway: "172.17.25.121"
+    wan_interface: ens33        # Ajustar según la interfaz real del servidor
+    netplan_file: /etc/netplan/00-installer-config.yaml
+    nameservers:
+      - "8.8.8.8"
+      - "1.1.1.1"
+      - "192.168.13.96"
+      - "192.168.13.97"
+
+  tasks:
+    - name: Verificar que la interfaz de red existe
+      ansible.builtin.stat:
+        path: "/sys/class/net/{{ wan_interface }}"
+      register: iface_check
+      failed_when: not iface_check.stat.exists
+
+    - name: Verificar que la IP actual coincide con la IP estática deseada
+      ansible.builtin.shell: |
+        ip -4 addr show {{ wan_interface }} | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+      register: current_ip
+      changed_when: false
+      failed_when: static_ip not in current_ip.stdout
+
+    - name: Hacer backup del netplan actual
+      ansible.builtin.copy:
+        src: "{{ netplan_file }}"
+        dest: "{{ netplan_file }}.backup.{{ ansible_date_time.epoch }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Deshabilitar cloud-init network management
+      ansible.builtin.copy:
+        dest: /etc/cloud/cloud.cfg.d/99-disable-network.cfg
+        mode: "0644"
+        owner: root
+        group: root
+        content: "network: {config: disabled}\n"
+
+    - name: Eliminar configuración de red generada por cloud-init
+      ansible.builtin.file:
+        path: /etc/netplan/50-cloud-init.yaml
+        state: absent
+
+    - name: Escribir configuración netplan con IP estática
+      ansible.builtin.copy:
+        dest: "{{ netplan_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          network:
+            version: 2
+            renderer: networkd
+            ethernets:
+              {{ wan_interface }}:
+                dhcp4: false
+                addresses:
+                  - {{ static_ip }}/{{ prefix }}
+                routes:
+                  - to: default
+                    via: {{ gateway }}
+                nameservers:
+                  addresses: {{ nameservers | to_json }}
+      notify: Aplicar netplan
+
+    - name: Validar sintaxis netplan antes de aplicar
+      ansible.builtin.command: netplan generate
+      changed_when: false
+
+    - name: Forzar aplicacion de netplan
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verificar conectividad tras cambio de configuración
+      ansible.builtin.wait_for:
+        host: "{{ static_ip }}"
+        port: 22
+        timeout: 30
+        delay: 5
+      delegate_to: localhost
+      become: false
+
+    - name: Confirmar IP asignada tras aplicar netplan
+      ansible.builtin.shell: |
+        ip -4 addr show {{ wan_interface }} | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+      register: confirmed_ip
+      changed_when: false
+
+    - name: Mostrar IP configurada
+      ansible.builtin.debug:
+        msg: "IP estática configurada correctamente: {{ confirmed_ip.stdout }}"
+
+  handlers:
+    - name: Aplicar netplan
+      ansible.builtin.command: netplan apply
+      changed_when: true
