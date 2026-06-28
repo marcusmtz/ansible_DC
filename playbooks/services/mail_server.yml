@@ -13,12 +13,11 @@
     ldap_server: "192.168.10.5"
     ldap_base_dn: "DC=norcom,DC=internal"
     ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
-    
-    # === VARIABLES EN TEXTO PLANO FIJAS ===
+
     iredmail_version: "1.8.2"
     iredmail_admin_password: "PasswordSeguroMySQL2026!"
     domain_admin_password: "PasswordDelAdministradorAD"
-    
+
     mail_users:
       - username: admin1
         display_name: "Admin Uno"
@@ -34,6 +33,10 @@
         display_name: "Ventas Dos"
 
   tasks:
+
+    # =========================================================================
+    # SISTEMA BASE
+    # =========================================================================
     - name: Actualizar paquetes
       ansible.builtin.apt:
         update_cache: true
@@ -61,39 +64,39 @@
       ansible.builtin.timezone:
         name: America/Lima
 
-    # iRedMail requiere que el hostname sea el FQDN completo
+    # =========================================================================
+    # RED Y NOMBRE DE HOST
+    # iRedMail valida el FQDN antes de instalar. Debe estar correcto aqui.
+    # =========================================================================
     - name: Configurar hostname como FQDN
       ansible.builtin.hostname:
         name: "{{ fqdn }}"
 
-    - name: Configurar /etc/hosts - entrada del servidor de correo
+    - name: Configurar /etc/hosts - servidor de correo
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: "^{{ mail_ip }}\\s"
         line: "{{ mail_ip }} {{ fqdn }} {{ hostname_mail }}"
 
-    - name: Configurar /etc/hosts - entrada del DNS master
+    - name: Configurar /etc/hosts - DNS master
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: "^{{ dns_master_ip }}\\s"
         line: "{{ dns_master_ip }} dc1.norcom.internal dc1"
 
-    - name: Configurar /etc/hosts - entrada del DNS secundario
+    - name: Configurar /etc/hosts - DNS secundario
       ansible.builtin.lineinfile:
         path: /etc/hosts
         regexp: "^{{ dns_secondary_ip }}\\s"
         line: "{{ dns_secondary_ip }} dns2.norcom.internal dns2"
 
-    # =========================================================================
-    # CONFIGURACIÓN DNS ANTES DE LA INSTALACIÓN
-    # =========================================================================
     - name: Crear directorio drop-in para systemd-resolved
       ansible.builtin.file:
         path: /etc/systemd/resolved.conf.d
         state: directory
         mode: '0755'
 
-    - name: Configurar DNS en systemd-resolved (split-DNS)
+    - name: Configurar split-DNS en systemd-resolved
       ansible.builtin.copy:
         dest: /etc/systemd/resolved.conf.d/iredmail-dns.conf
         mode: '0644'
@@ -109,30 +112,26 @@
         state: restarted
 
     # =========================================================================
-    # PROCESO DE INSTALACIÓN DE IREDMAIL
+    # INSTALACION DE iRedMail
+    #
+    # IMPORTANTE: No instalar ni configurar MariaDB antes de este bloque.
+    # iRedMail instala y configura MariaDB por si mismo. Si MariaDB ya esta
+    # instalado o root ya tiene contrasena, el instalador detecta MySQL como
+    # "ya configurado" y omite silenciosamente la creacion del esquema vmail,
+    # dejando la base de datos vacia.
+    #
+    # La guardia de idempotencia es /root/iRedMail.tips: iRedMail solo crea
+    # este archivo al completar exitosamente la instalacion completa.
+    # Usar /etc/postfix/main.cf es incorrecto porque postfix puede instalarse
+    # como dependencia antes de que iRedMail corra.
     # =========================================================================
-    # PRE-INSTALAR MARIADB Y FIJAR PASSWORD ROOT ANTES DE iRedMail
-    # =========================================================================
-    - name: Pre-instalar MariaDB antes de iRedMail
-      ansible.builtin.apt:
-        name: mariadb-server
-        state: present
-
-    - name: Fijar password root MySQL via socket antes de que iRedMail lo modifique
-      ansible.builtin.shell: |
-        mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ iredmail_admin_password }}';"
-      no_log: true
-      changed_when: true
-      ignore_errors: true
-
-    # =========================================================================
-    - name: Instalar iRedMail con proteccion de firewall
+    - name: Instalar iRedMail
       block:
-        - name: Deshabilitar UFW temporalmente para permitir descargas
+        - name: Deshabilitar UFW durante la instalacion
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Crear dialog falso para instalacion silenciosa
+        - name: Crear dialog falso para instalacion no interactiva
           ansible.builtin.copy:
             dest: /usr/local/bin/dialog
             mode: '0755'
@@ -154,12 +153,12 @@
             remote_src: true
             creates: "/opt/iRedMail-{{ iredmail_version }}"
 
-        - name: Eliminar config previo incompleto si existe
+        - name: Eliminar config previo incompleto
           ansible.builtin.file:
             path: "/opt/iRedMail-{{ iredmail_version }}/config"
             state: absent
 
-        - name: Crear archivo de respuestas para instalacion no interactiva
+        - name: Crear config de iRedMail para instalacion no interactiva
           ansible.builtin.copy:
             dest: "/opt/iRedMail-{{ iredmail_version }}/config"
             mode: '0600'
@@ -195,7 +194,7 @@
               #EOF
           no_log: true
 
-        - name: Ejecutar instalador iRedMail (no interactivo)
+        - name: Ejecutar instalador iRedMail
           ansible.builtin.shell:
             cmd: "bash iRedMail.sh"
             chdir: "/opt/iRedMail-{{ iredmail_version }}"
@@ -205,21 +204,16 @@
             CHECK_NEW_VERSION: "NO"
             AUTO_USE_EXISTING_CONFIG_FILE: "y"
           args:
-            creates: /etc/postfix/main.cf
+            creates: /root/iRedMail.tips
           register: iredmail_install
           async: 7200
           poll: 60
           changed_when: true
 
-        - name: Eliminar dialog falso tras instalacion
+        - name: Eliminar dialog falso
           ansible.builtin.file:
             path: /usr/local/bin/dialog
             state: absent
-
-        - name: Mostrar resultado de instalacion
-          ansible.builtin.debug:
-            var: iredmail_install.stdout_lines
-          when: iredmail_install.changed
 
         - name: Configurar Dovecot para autenticar contra Active Directory
           ansible.builtin.copy:
@@ -238,12 +232,11 @@
               pass_filter = (&(objectClass=person)(sAMAccountName=%n))
               pass_attrs = =password=binddn
               default_pass_scheme = PLAIN
-          when: iredmail_install.changed
 
-        - name: Reiniciar tras instalacion iRedMail
+        - name: Reiniciar servidor tras instalacion
           ansible.builtin.reboot:
             reboot_timeout: 600
-          when: iredmail_install.changed
+          when: iredmail_install is changed
 
       always:
         - name: Permitir SSH
@@ -311,37 +304,21 @@
             state: enabled
 
     # =========================================================================
-    # RESTAURAR AUTH ROOT MYSQL (iRedMail puede romper socket auth)
+    # POST-INSTALACION
+    # iRedMail ha instalado MariaDB, creado el esquema vmail y configurado
+    # todos los servicios. Root tiene la contrasena MYSQL_ROOT_PASSWORD
+    # y se conecta via socket (sin -h). vmailadmin conecta via TCP (127.0.0.1).
     # =========================================================================
-    # =========================================================================
-    # IMPORTAR ESQUEMA VMAIL
-    # =========================================================================
-    - name: Importar esquema vmail (tolerante a objetos ya existentes)
+    - name: Verificar que iRedMail creo el esquema vmail correctamente
       ansible.builtin.shell: |
-        mysql -u root -p'{{ iredmail_admin_password }}' --force \
-          < /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql
-        mysql -u root -p'{{ iredmail_admin_password }}' --force vmail \
-          < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql
-      no_log: true
-      changed_when: false
-      ignore_errors: true
-
-    - name: Verificar que la tabla domain existe tras el import
-      ansible.builtin.shell: |
-        mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -sN -e \
+        mysql -u root -p'{{ iredmail_admin_password }}' vmail -sN -e \
           "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail' AND table_name='domain';"
       no_log: true
       changed_when: false
-      register: domain_table_check
-      failed_when: domain_table_check.stdout | trim == "0"
+      register: vmail_schema_check
+      failed_when: (vmail_schema_check.stdout | trim | int) == 0
 
-    - name: Instalar nginx si no esta presente
-      ansible.builtin.apt:
-        name: nginx
-        state: present
-        update_cache: false
-
-    - name: Asegurar que nginx este activo
+    - name: Asegurar que nginx esta activo
       ansible.builtin.systemd:
         name: nginx
         state: started
@@ -353,6 +330,7 @@
           INSERT IGNORE INTO domain (domain, transport, active, created)
           VALUES ('{{ domain_mail }}', 'dovecot', 1, NOW());
         "
+      no_log: true
       changed_when: false
 
     - name: Crear buzon de correo para cada usuario AD
@@ -381,7 +359,7 @@
       no_log: true
       changed_when: false
 
-    - name: Advertencia registros DNS
+    - name: Recordatorio de registros DNS manuales
       ansible.builtin.debug:
         msg:
           - "IMPORTANTE: Crear manualmente en el DC Windows los siguientes registros DNS:"
