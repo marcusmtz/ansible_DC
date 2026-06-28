@@ -80,6 +80,17 @@
       register: dhcp_authorize
       changed_when: "'AUTHORIZED' in dhcp_authorize.stdout"
 
+    - name: Completar post-instalacion de seguridad DHCP
+      ansible.windows.win_shell: |
+        Invoke-DhcpServerPostInstall -ErrorAction SilentlyContinue 2>&1 | Out-Null
+        Write-Output "DONE"
+      changed_when: false
+
+    - name: Esperar que el servicio DHCP este operativo
+      ansible.windows.win_service:
+        name: DHCPServer
+        state: started
+
     - name: Crear scope DHCP por VLAN
       ansible.windows.win_shell: |
         $scopeId = "{{ item.scope_id }}"
