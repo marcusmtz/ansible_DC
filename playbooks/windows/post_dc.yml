@@ -114,7 +114,7 @@
     - name: Configurar opciones de scope DHCP (router, DNS y lease)
       ansible.windows.win_shell: |
         $scopeId = "{{ item.scope_id }}"
-        $dnsServers = @({{ item.dns_servers | map('regex_replace', '^(.*)$', '"\\1"') | join(', ') }})
+        [string[]]$dnsServers = "{{ item.dns_servers | join(',') }}" -split ","
         $expectedLease = [TimeSpan]::new({{ item.lease_days }}, {{ item.lease_hours }}, 0, 0)
         $changed = $false
 

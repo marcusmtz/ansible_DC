@@ -502,6 +502,21 @@
           ));
 
           // ------------------------------------------------------------------
+          // VLAN 20 - ADMINISTRACION: Permite trafico inter-VLAN hacia Servidores
+          // Sin gateway: trafico local entre VLANs, no sale a WAN
+          // Debe ir ANTES de la regla de Internet para evitar policy routing
+          // ------------------------------------------------------------------
+          upsert_rule($a_filter, array(
+              'type'        => 'pass',
+              'interface'   => 'administracion',
+              'ipprotocol'  => 'inet',
+              'protocol'    => 'any',
+              'source'      => array('network' => 'administracion'),
+              'destination' => array('network' => 'servidores'),
+              'descr'       => 'Administracion a Servidores'
+          ));
+
+          // ------------------------------------------------------------------
           // VLAN 20 - ADMINISTRACION: Permite todo hacia Internet via WAN1_PRIMARY
           // FIX: gateway agregado para policy routing correcto
           // ------------------------------------------------------------------
