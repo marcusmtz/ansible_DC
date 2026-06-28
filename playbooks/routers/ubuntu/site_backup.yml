@@ -529,6 +529,9 @@
             ip rule del priority "$prio" 2>/dev/null || true
           done
 
+          # Excepcion: trafico entre VLANs locales usa tabla main (prioridad mayor)
+          ip rule add from 192.168.0.0/16 to 192.168.0.0/16 lookup main priority 100
+
           ip rule add from 192.168.10.0/26 table wan1_primary priority 110
           ip rule add from 192.168.20.0/25 table wan1_primary priority 120
           ip rule add from 192.168.30.0/26 table wan2_primary priority 130
