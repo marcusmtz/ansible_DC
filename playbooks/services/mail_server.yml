@@ -297,15 +297,16 @@
 
     - name: Asegurar que el dominio existe en iRedMail
       ansible.builtin.shell: |
-        mysql vmail -e "
+        mysql -u vmailadmin -p'{{ iredmail_admin_password }}' vmail -e "
           INSERT IGNORE INTO domain (domain, transport, active, created)
           VALUES ('{{ domain_mail }}', 'dovecot', 1, NOW());
         "
+      no_log: true
       changed_when: false
 
     - name: Crear buzon de correo para cada usuario AD
       ansible.builtin.shell: |
-        mysql vmail -e "
+        mysql -u vmailadmin -p'{{ iredmail_admin_password }}' vmail -e "
           INSERT IGNORE INTO mailbox (username, password, name, maildir, quota, domain, active, created)
           VALUES (
             '{{ item.username }}@{{ domain_mail }}',
@@ -326,6 +327,7 @@
           );
         "
       loop: "{{ mail_users }}"
+      no_log: true
       changed_when: false
 
     - name: Advertencia registros DNS
