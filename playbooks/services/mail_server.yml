@@ -53,6 +53,8 @@
           - unzip
           - software-properties-common
           - ufw
+          - ca-certificates
+          - python3
         state: present
 
     - name: Configurar timezone
@@ -117,15 +119,20 @@
 
         - name: Obtener ultima version estable de iRedMail
           ansible.builtin.shell: |
-            REDIRECT=$(curl -s -4 -L -o /dev/null -w "%{url_effective}" \
-              https://github.com/iredmail/iRedMail/releases/latest)
-            VERSION=$(echo "$REDIRECT" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?$')
-            if [ -z "$VERSION" ]; then
-              VERSION=$(curl -s -4 -L -A "Ansible-iRedMail" \
-                https://api.github.com/repos/iredmail/iRedMail/releases/latest \
-                | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v\r\n ')
-            fi
-            echo -n "$VERSION"
+            python3 - <<'PYEOF'
+            import urllib.request, json, sys
+            req = urllib.request.Request(
+                'https://api.github.com/repos/iredmail/iRedMail/releases/latest',
+                headers={'User-Agent': 'Ansible/iRedMail-Deploy'}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    data = json.loads(r.read().decode())
+                    print(data['tag_name'].lstrip('v'), end='')
+            except Exception as e:
+                sys.stderr.write(str(e) + '\n')
+                sys.exit(1)
+            PYEOF
           register: iredmail_latest
           changed_when: false
 
