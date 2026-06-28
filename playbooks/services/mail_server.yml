@@ -304,9 +304,9 @@
         mysqld_safe --skip-grant-tables --skip-networking &
         SAFE_PID=$!
         sleep 10
-        mysql -e "FLUSH PRIVILEGES; UPDATE mysql.user SET plugin='unix_socket', password='' WHERE User='root' AND Host='localhost'; FLUSH PRIVILEGES;" || true
-        pkill -f "mysqld_safe" || true
-        pkill -f "mysqld --skip-grant" || true
+        mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket; FLUSH PRIVILEGES;" || true
+        kill $SAFE_PID 2>/dev/null || true
+        kill $(cat /var/run/mysqld/mysqld.pid 2>/dev/null) 2>/dev/null || true
         sleep 3
         systemctl start mariadb
         sleep 5
