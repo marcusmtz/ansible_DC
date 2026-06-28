@@ -10,11 +10,15 @@
     mail_ip: "192.168.10.9"
     dns_master_ip: "192.168.10.5"
     dns_secondary_ip: "192.168.10.6"
-    iredmail_version: ""
     ldap_server: "192.168.10.5"
-
     ldap_base_dn: "DC=norcom,DC=internal"
     ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
+    
+    # === ¡DEFINIR CONTRASEÑAS AQUÍ PARA EVITAR FALLOS DE ANSIBLE! ===
+    iredmail_admin_password: "PasswordSeguroMySQL2026!"
+    domain_admin_password: "PasswordDelAdministradorAD"
+    
+    iredmail_version: ""
     mail_users:
       - username: admin1
         display_name: "Admin Uno"
@@ -78,23 +82,29 @@
         regexp: "^{{ dns_secondary_ip }}\\s"
         line: "{{ dns_secondary_ip }} dns2.norcom.internal dns2"
 
-    - name: Obtener ultima version de iRedMail desde GitHub
-      ansible.builtin.shell: |
-        curl -s -4 -L https://api.github.com/repos/iredmail/iRedMail/releases/latest \
-          | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v\r\n '
-      register: iredmail_latest
-      changed_when: false
+    # =========================================================================
+    # CONSULTA SEGURA DE VERSIÓN (Módulo Nativo de Ansible)
+    # =========================================================================
+    - name: Obtener ultima version de iRedMail desde la API de GitHub
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/iredmail/iRedMail/releases/latest
+        return_content: true
+        status_code: 200
+      register: iredmail_api_response
+
+    - name: Registrar version sin prefijo v (Usa regex seguro)
+      ansible.builtin.set_fact:
+        iredmail_version: "{{ iredmail_api_response.json.tag_name | regex_replace('^v', '') | trim }}"
 
     - name: Validar que se obtuvo la version
       ansible.builtin.assert:
         that:
-          - iredmail_latest.stdout | trim | length > 0
-        fail_msg: "No se pudo obtener la version de iRedMail desde GitHub. Verifica conectividad."
+          - iredmail_version | length > 0
+        fail_msg: "No se pudo procesar la version de iRedMail desde el JSON de GitHub."
 
-    - name: Registrar version sin prefijo v
-      ansible.builtin.set_fact:
-        iredmail_version: "{{ iredmail_latest.stdout | trim }}"
-
+    # =========================================================================
+    # CAMBIO DE DNS (Una vez descargada la meta de GitHub)
+    # =========================================================================
     - name: Crear directorio drop-in para systemd-resolved
       ansible.builtin.file:
         path: /etc/systemd/resolved.conf.d
@@ -116,23 +126,20 @@
         name: systemd-resolved
         state: restarted
 
+    # =========================================================================
+    # PROCESO DE INSTALACIÓN DE IREDMAIL
+    # =========================================================================
     - name: Instalar iRedMail con proteccion de firewall
       block:
         - name: Deshabilitar UFW temporalmente para permitir descargas
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Descargar iRedMail
-          ansible.builtin.shell: |
-            curl -4 -L -s -S \
-              https://github.com/iredmail/iRedMail/archive/refs/tags/v{{ iredmail_version }}.tar.gz \
-              -o /opt/iredmail-{{ iredmail_version }}.tar.gz
-          args:
-            creates: "/opt/iredmail-{{ iredmail_version }}.tar.gz"
-          register: download_result
-          until: download_result.rc == 0
-          retries: 5
-          delay: 10
+        - name: Descargar iRedMail Tarball
+          ansible.builtin.get_url:
+            url: "https://github.com/iredmail/iRedMail/archive/refs/tags/v{{ iredmail_version }}.tar.gz"
+            dest: "/opt/iredmail-{{ iredmail_version }}.tar.gz"
+            mode: '0644'
 
         - name: Extraer iRedMail
           ansible.builtin.unarchive:
