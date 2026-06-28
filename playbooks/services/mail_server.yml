@@ -78,28 +78,9 @@
         regexp: "^{{ dns_secondary_ip }}\\s"
         line: "{{ dns_secondary_ip }} dns2.norcom.internal dns2"
 
-    - name: Crear directorio drop-in para systemd-resolved
-      ansible.builtin.file:
-        path: /etc/systemd/resolved.conf.d
-        state: directory
-        mode: '0755'
-
-    - name: Configurar DNS en systemd-resolved
-      ansible.builtin.copy:
-        dest: /etc/systemd/resolved.conf.d/iredmail-dns.conf
-        mode: '0644'
-        content: |
-          [Resolve]
-          DNS={{ dns_master_ip }} {{ dns_secondary_ip }} 8.8.8.8
-          Domains={{ domain_mail }}
-    - name: Reiniciar systemd-resolved
-      ansible.builtin.systemd:
-        name: systemd-resolved
-        state: restarted
-
     - name: Obtener ultima version de iRedMail desde GitHub
       ansible.builtin.shell: |
-        curl -s https://api.github.com/repos/iredmail/iRedMail/releases/latest \
+        curl -s -4 -L https://api.github.com/repos/iredmail/iRedMail/releases/latest \
           | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v\r\n '
       register: iredmail_latest
       changed_when: false
@@ -113,6 +94,27 @@
     - name: Registrar version sin prefijo v
       ansible.builtin.set_fact:
         iredmail_version: "{{ iredmail_latest.stdout | trim }}"
+
+    - name: Crear directorio drop-in para systemd-resolved
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: '0755'
+
+    - name: Configurar DNS en systemd-resolved (split-DNS)
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/iredmail-dns.conf
+        mode: '0644'
+        content: |
+          [Resolve]
+          DNS={{ dns_master_ip }} {{ dns_secondary_ip }}
+          FallbackDNS=8.8.8.8 1.1.1.1
+          Domains=~{{ domain_mail }}
+
+    - name: Reiniciar systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
 
     - name: Instalar iRedMail con proteccion de firewall
       block:
