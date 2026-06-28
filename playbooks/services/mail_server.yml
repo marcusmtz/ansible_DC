@@ -115,11 +115,12 @@
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Descargar iRedMail Tarball desde el sitio oficial
+        - name: Descargar iRedMail desde GitHub releases
           ansible.builtin.get_url:
-            url: "https://dl.iredmail.org/yum/misc/iRedMail-{{ iredmail_version }}.tar.gz"
+            url: "https://github.com/iredmail/iRedMail/archive/refs/tags/v{{ iredmail_version }}.tar.gz"
             dest: "/opt/iredmail-{{ iredmail_version }}.tar.gz"
             mode: '0644'
+            force: false
 
         - name: Extraer iRedMail
           ansible.builtin.unarchive:
