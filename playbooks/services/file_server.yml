@@ -29,6 +29,8 @@
           - krb5-user
           - realmd
           - adcli
+          - sssd
+          - sssd-tools
         state: present
         update_cache: true
 
@@ -54,17 +56,27 @@
         mode: "0770"
       loop: "{{ smb_shares }}"
 
-    - name: Agregar winbind a nsswitch passwd
+    - name: Configurar nsswitch passwd con sss
       ansible.builtin.lineinfile:
         path: /etc/nsswitch.conf
         regexp: '^passwd:'
-        line: 'passwd:         compat winbind'
+        line: 'passwd:         files sss'
 
-    - name: Agregar winbind a nsswitch group
+    - name: Configurar nsswitch group con sss
       ansible.builtin.lineinfile:
         path: /etc/nsswitch.conf
         regexp: '^group:'
-        line: 'group:          compat winbind'
+        line: 'group:          files sss'
+
+    - name: Reiniciar SSSD para aplicar configuracion del dominio
+      ansible.builtin.systemd:
+        name: sssd
+        state: restarted
+        enabled: true
+
+    - name: Limpiar cache de SSSD para forzar lectura del AD
+      ansible.builtin.command: sss_cache -E
+      changed_when: false
 
     - name: Configurar Samba para Active Directory
       ansible.builtin.copy:
