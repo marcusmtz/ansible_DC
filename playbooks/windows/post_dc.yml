@@ -126,7 +126,7 @@
 
         $currentDns = (Get-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 6 -ErrorAction SilentlyContinue).Value
         if (-not $currentDns -or (Compare-Object $currentDns $dnsServers)) {
-          Set-DhcpServerv4OptionValue -ScopeId $scopeId -DnsServer $dnsServers -Force
+          Set-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 6 -Value $dnsServers -Force
           $changed = $true
         }
 
