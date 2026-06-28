@@ -15,7 +15,7 @@
     ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
     
     # === VARIABLES EN TEXTO PLANO FIJAS ===
-    iredmail_version: "1.8.2"
+    iredmail_version: ""
     iredmail_admin_password: "PasswordSeguroMySQL2026!"
     domain_admin_password: "PasswordDelAdministradorAD"
     
@@ -114,6 +114,27 @@
         - name: Deshabilitar UFW temporalmente para permitir descargas
           ansible.builtin.ufw:
             state: disabled
+
+        - name: Obtener ultima version estable de iRedMail desde GitHub
+          ansible.builtin.shell: |
+            curl -s -4 -L https://api.github.com/repos/iredmail/iRedMail/releases/latest \
+              | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v\r\n '
+          register: iredmail_latest
+          changed_when: false
+
+        - name: Validar que se obtuvo la version
+          ansible.builtin.assert:
+            that:
+              - iredmail_latest.stdout | trim | length > 0
+            fail_msg: "No se pudo obtener la version de iRedMail. Verifica conectividad a api.github.com"
+
+        - name: Registrar version obtenida
+          ansible.builtin.set_fact:
+            iredmail_version: "{{ iredmail_latest.stdout | trim }}"
+
+        - name: Mostrar version a instalar
+          ansible.builtin.debug:
+            msg: "Instalando iRedMail version: {{ iredmail_version }}"
 
         - name: Descargar iRedMail desde GitHub releases
           ansible.builtin.get_url:
