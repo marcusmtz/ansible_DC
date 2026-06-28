@@ -126,6 +126,10 @@
               {{ wan2_interface }}:
                 dhcp4: false
                 addresses: [{{ wan2_address }}]
+                routes:
+                  - to: default
+                    via: {{ wan2_gateway }}
+                    metric: 200
               {{ trunk_interface }}:
                 dhcp4: false
             vlans:
