@@ -11,7 +11,23 @@
     dns_master_ip: "192.168.10.5"
     dns_secondary_ip: "192.168.10.6"
     iredmail_version: "1.7.2"
-    iredmail_admin_password: "{{ iredmail_admin_password }}"
+    ldap_server: "192.168.10.5"
+
+    ldap_base_dn: "DC=norcom,DC=internal"
+    ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
+    mail_users:
+      - username: admin1
+        display_name: "Admin Uno"
+      - username: admin2
+        display_name: "Admin Dos"
+      - username: ti1
+        display_name: "TI Uno"
+      - username: ti2
+        display_name: "TI Dos"
+      - username: ventas1
+        display_name: "Ventas Uno"
+      - username: ventas2
+        display_name: "Ventas Dos"
 
   tasks:
     - name: Actualizar paquetes
@@ -171,6 +187,25 @@
             var: iredmail_install.stdout_lines
           when: iredmail_install.changed
 
+        - name: Configurar Dovecot para autenticar contra Active Directory
+          ansible.builtin.copy:
+            dest: /etc/dovecot/dovecot-ldap.conf.ext
+            mode: '0600'
+            content: |
+              hosts = {{ ldap_server }}
+              ldap_version = 3
+              auth_bind = yes
+              dn = {{ ldap_bind_dn }}
+              dnpass = {{ domain_admin_password }}
+              base = {{ ldap_base_dn }}
+              scope = subtree
+              deref = never
+              user_filter = (&(objectClass=person)(sAMAccountName=%n))
+              pass_filter = (&(objectClass=person)(sAMAccountName=%n))
+              pass_attrs = =password=binddn
+              default_pass_scheme = PLAIN
+          when: iredmail_install.changed
+
         - name: Reiniciar tras instalacion iRedMail
           ansible.builtin.reboot:
             reboot_timeout: 600
@@ -240,6 +275,39 @@
         - name: Habilitar UFW
           ansible.builtin.ufw:
             state: enabled
+
+    - name: Asegurar que el dominio existe en iRedMail
+      ansible.builtin.shell: |
+        mysql -u root -p'{{ iredmail_admin_password }}' vmail -e "
+          INSERT IGNORE INTO domain (domain, transport, active, created)
+          VALUES ('{{ domain_mail }}', 'dovecot', 1, NOW());
+        "
+      changed_when: false
+
+    - name: Crear buzon de correo para cada usuario AD
+      ansible.builtin.shell: |
+        mysql -u root -p'{{ iredmail_admin_password }}' vmail -e "
+          INSERT IGNORE INTO mailbox (username, password, name, maildir, quota, domain, active, created)
+          VALUES (
+            '{{ item.username }}@{{ domain_mail }}',
+            '{PLAIN}AD_AUTH',
+            '{{ item.display_name }}',
+            '{{ domain_mail }}/{{ item.username }}/',
+            1024,
+            '{{ domain_mail }}',
+            1,
+            NOW()
+          );
+          INSERT IGNORE INTO alias (address, goto, domain, active)
+          VALUES (
+            '{{ item.username }}@{{ domain_mail }}',
+            '{{ item.username }}@{{ domain_mail }}',
+            '{{ domain_mail }}',
+            1
+          );
+        "
+      loop: "{{ mail_users }}"
+      changed_when: false
 
     - name: Advertencia registros DNS
       ansible.builtin.debug:
