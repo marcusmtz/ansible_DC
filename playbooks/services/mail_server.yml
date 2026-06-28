@@ -14,6 +14,7 @@
     ldap_base_dn: "DC=norcom,DC=internal"
     ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
     
+    # === VARIABLES EN TEXTO PLANO FIJAS ===
     iredmail_version: "1.8.2"
     iredmail_admin_password: "PasswordSeguroMySQL2026!"
     domain_admin_password: "PasswordDelAdministradorAD"
@@ -114,9 +115,9 @@
           ansible.builtin.ufw:
             state: disabled
 
-        - name: Descargar iRedMail Tarball
+        - name: Descargar iRedMail Tarball desde el sitio oficial
           ansible.builtin.get_url:
-            url: "https://github.com/iredmail/iRedMail/archive/refs/tags/v{{ iredmail_version }}.tar.gz"
+            url: "https://dl.iredmail.org/yum/misc/iRedMail-{{ iredmail_version }}.tar.gz"
             dest: "/opt/iredmail-{{ iredmail_version }}.tar.gz"
             mode: '0644'
 
