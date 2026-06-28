@@ -646,6 +646,14 @@
         - policy-routing.service
         - wan-failover.timer
 
+    - name: Forzar la aplicacion inmediata del Policy Routing y Failover
+      ansible.builtin.shell: |
+        /usr/local/bin/policy-routing-setup.sh
+        /usr/local/bin/wan-failover.sh
+      args:
+        executable: /bin/bash
+      changed_when: true
+
     # --- VRRP por VLAN ---
     - name: Configurar keepalived con una instancia por VLAN
       ansible.builtin.copy:
