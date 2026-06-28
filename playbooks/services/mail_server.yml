@@ -295,13 +295,67 @@
           ansible.builtin.ufw:
             state: enabled
 
-    - name: Importar esquema vmail si las tablas no existen
+    # =========================================================================
+    # RESTAURAR AUTH ROOT MYSQL (iRedMail puede romper socket auth)
+    # =========================================================================
+    - name: Detener MariaDB para reset de autenticacion root
+      ansible.builtin.systemd:
+        name: mariadb
+        state: stopped
+
+    - name: Crear override systemd para skip-grant-tables
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/mariadb.service.d/skip-grant.conf
+        mode: '0644'
+        content: |
+          [Service]
+          ExecStartPre=
+          ExecStart=
+          ExecStart=/usr/bin/mysqld_safe --skip-grant-tables --skip-networking
+
+    - name: Iniciar MariaDB en modo skip-grant-tables
+      ansible.builtin.systemd:
+        daemon_reload: true
+        name: mariadb
+        state: started
+
+    - name: Esperar socket MariaDB
+      ansible.builtin.wait_for:
+        path: /var/run/mysqld/mysqld.sock
+        timeout: 30
+
+    - name: Restaurar autenticacion unix_socket para root
       ansible.builtin.shell: |
-        TABLE_COUNT=$(mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -sN -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail';")
-        if [ "$TABLE_COUNT" -eq 0 ]; then
+        mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket; FLUSH PRIVILEGES;"
+      changed_when: true
+
+    - name: Eliminar override skip-grant-tables
+      ansible.builtin.file:
+        path: /etc/systemd/system/mariadb.service.d/skip-grant.conf
+        state: absent
+
+    - name: Reiniciar MariaDB normalmente
+      ansible.builtin.systemd:
+        daemon_reload: true
+        name: mariadb
+        state: restarted
+
+    - name: Esperar MariaDB tras reinicio
+      ansible.builtin.wait_for:
+        path: /var/run/mysqld/mysqld.sock
+        timeout: 30
+
+    # =========================================================================
+    # IMPORTAR ESQUEMA VMAIL
+    # =========================================================================
+    - name: Importar esquema vmail si la tabla domain no existe
+      ansible.builtin.shell: |
+        DOMAIN_TABLE=$(mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail -sN -e \
+          "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='vmail' AND table_name='domain';")
+        if [ "$DOMAIN_TABLE" -eq 0 ]; then
           grep -v "^CREATE DATABASE" /opt/iRedMail-{{ iredmail_version }}/runtime/init_vmail_db.sql | \
-            mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail
-          mysql -u vmailadmin -p'{{ iredmail_admin_password }}' -h 127.0.0.1 vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql
+            mysql vmail
+          mysql vmail < /opt/iRedMail-{{ iredmail_version }}/runtime/add_first_domain_and_user.sql
         fi
       no_log: true
       changed_when: false
