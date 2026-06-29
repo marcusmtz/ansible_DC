@@ -1,0 +1,360 @@
+---
+- name: Instalacion completa de Zabbix 7.0 LTS en Ubuntu Server 24.04
+  hosts: zabbix_server
+  become: true
+
+  vars:
+    # === Red ===
+    zabbix_hostname: zabbix
+    zabbix_fqdn: "zabbix.norcom.internal"
+    zabbix_ip: "192.168.10.10"
+    dns_master_ip: "192.168.10.5"
+    dns_secondary_ip: "192.168.10.6"
+
+    # === Zabbix ===
+    zabbix_version: "7.0"
+    zabbix_db_name: zabbix
+    zabbix_db_user: zabbix
+    zabbix_db_password: "{{ vault_zabbix_db_password }}"
+    zabbix_admin_password: "{{ vault_zabbix_admin_password }}"
+
+    # === Sistema ===
+    system_timezone: "America/Lima"
+
+  tasks:
+
+    # =========================================================================
+    # SISTEMA BASE
+    # =========================================================================
+    - name: Actualizar paquetes
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: safe
+      register: apt_result
+      until: apt_result is succeeded
+      retries: 5
+      delay: 10
+
+    - name: Instalar dependencias basicas
+      ansible.builtin.apt:
+        name:
+          - wget
+          - curl
+          - vim
+          - net-tools
+          - ca-certificates
+          - python3
+          - python3-pymysql
+        state: present
+
+    - name: Configurar timezone del sistema
+      community.general.timezone:
+        name: "{{ system_timezone }}"
+      notify: Restart cron
+
+    - name: Configurar hostname
+      ansible.builtin.hostname:
+        name: "{{ zabbix_fqdn }}"
+
+    - name: Configurar /etc/hosts
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "^{{ zabbix_ip }}\\s"
+        line: "{{ zabbix_ip }} {{ zabbix_fqdn }} {{ zabbix_hostname }}"
+
+    - name: Crear directorio drop-in para systemd-resolved
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: '0755'
+
+    - name: Configurar DNS interno en systemd-resolved
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/norcom.conf
+        mode: '0644'
+        content: |
+          [Resolve]
+          DNS={{ dns_master_ip }} {{ dns_secondary_ip }}
+          FallbackDNS=8.8.8.8
+          Domains=~norcom.internal
+      notify: Restart systemd-resolved
+
+    # =========================================================================
+    # MARIADB
+    # =========================================================================
+    - name: Instalar MariaDB
+      ansible.builtin.apt:
+        name: mariadb-server
+        state: present
+
+    - name: Habilitar y arrancar MariaDB
+      ansible.builtin.systemd:
+        name: mariadb
+        enabled: true
+        state: started
+
+    - name: Crear base de datos zabbix
+      community.mysql.mysql_db:
+        name: "{{ zabbix_db_name }}"
+        encoding: utf8mb4
+        collation: utf8mb4_bin
+        state: present
+        login_unix_socket: /run/mysqld/mysqld.sock
+
+    - name: Crear usuario zabbix en MariaDB
+      community.mysql.mysql_user:
+        name: "{{ zabbix_db_user }}"
+        password: "{{ zabbix_db_password }}"
+        priv: "{{ zabbix_db_name }}.*:ALL"
+        host: localhost
+        state: present
+        login_unix_socket: /run/mysqld/mysqld.sock
+      no_log: true
+
+    # =========================================================================
+    # INSTALAR ZABBIX
+    # =========================================================================
+    - name: Descargar paquete de repositorio Zabbix {{ zabbix_version }}
+      ansible.builtin.get_url:
+        url: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_{{ zabbix_version }}+ubuntu24.04_all.deb"
+        dest: /tmp/zabbix-release.deb
+        mode: '0644'
+        force: false
+
+    - name: Instalar repositorio de Zabbix
+      ansible.builtin.apt:
+        deb: /tmp/zabbix-release.deb
+      notify: Update apt cache
+
+    - name: Actualizar cache apt tras agregar repositorio
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Instalar paquetes de Zabbix
+      ansible.builtin.apt:
+        name:
+          - zabbix-server-mysql
+          - zabbix-frontend-php
+          - zabbix-apache-conf
+          - zabbix-sql-scripts
+          - zabbix-agent2
+        state: present
+
+    # =========================================================================
+    # IMPORTAR SCHEMA (solo si la BD esta vacia)
+    # =========================================================================
+    - name: Verificar si el schema ya fue importado
+      community.mysql.mysql_query:
+        login_db: "{{ zabbix_db_name }}"
+        login_user: "{{ zabbix_db_user }}"
+        login_password: "{{ zabbix_db_password }}"
+        login_unix_socket: /run/mysqld/mysqld.sock
+        query: "SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema='{{ zabbix_db_name }}' AND table_name='hosts';"
+      register: schema_check
+      no_log: true
+
+    - name: Importar schema inicial de Zabbix
+      ansible.builtin.shell:
+        cmd: "zcat /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | mysql --default-character-set=utf8mb4 -u{{ zabbix_db_user }} -p{{ zabbix_db_password }} {{ zabbix_db_name }}"
+      when: schema_check.query_result[0][0]['cnt'] == 0
+      no_log: true
+      changed_when: true
+
+    # =========================================================================
+    # CONFIGURAR ZABBIX SERVER
+    # =========================================================================
+    - name: Configurar DBPassword en zabbix_server.conf
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: '^#?\s*DBPassword='
+        line: "DBPassword={{ zabbix_db_password }}"
+        state: present
+        backup: true
+      no_log: true
+      notify: Restart zabbix-server
+
+    - name: Configurar DBUser en zabbix_server.conf
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        regexp: '^#?\s*DBUser='
+        line: "DBUser={{ zabbix_db_user }}"
+        state: present
+
+    - name: Configurar timezone en configuracion PHP de Apache para Zabbix
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/apache.conf
+        regexp: '^\s*#?\s*php_value\s+date\.timezone'
+        line: "        php_value date.timezone {{ system_timezone }}"
+        state: present
+        backup: true
+      notify:
+        - Restart apache2
+
+    # =========================================================================
+    # HABILITAR Y ARRANCAR SERVICIOS
+    # =========================================================================
+    - name: Habilitar y arrancar servicios de Zabbix
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - zabbix-server
+        - zabbix-agent2
+        - apache2
+
+    # =========================================================================
+    # FIREWALL UFW
+    # =========================================================================
+    - name: Permitir SSH
+      community.general.ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: Permitir HTTP
+      community.general.ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Permitir HTTPS
+      community.general.ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+
+    - name: Permitir Zabbix Agent
+      community.general.ufw:
+        rule: allow
+        port: '10050'
+        proto: tcp
+
+    - name: Permitir Zabbix Server trapper
+      community.general.ufw:
+        rule: allow
+        port: '10051'
+        proto: tcp
+
+    - name: Habilitar UFW
+      community.general.ufw:
+        state: enabled
+
+    # =========================================================================
+    # CAMBIAR PASSWORD ADMIN VIA API REST
+    # Espera a que Zabbix este listo y cambia la clave del usuario Admin
+    # usando la API JSON-RPC de Zabbix 7.x
+    # =========================================================================
+    - name: Esperar que la API de Zabbix este disponible
+      ansible.builtin.uri:
+        url: "http://localhost/zabbix/api_jsonrpc.php"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "apiinfo.version"
+          params: {}
+          id: 1
+        status_code: 200
+      register: zabbix_api_check
+      until: zabbix_api_check.status == 200
+      retries: 12
+      delay: 10
+
+    - name: Intentar login con password por defecto (Admin/zabbix)
+      ansible.builtin.uri:
+        url: "http://localhost/zabbix/api_jsonrpc.php"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "user.login"
+          params:
+            username: "Admin"
+            password: "zabbix"
+          id: 1
+        status_code: 200
+      register: zabbix_login_default
+      failed_when: false
+      no_log: true
+
+    - name: Cambiar password del Admin de Zabbix
+      ansible.builtin.uri:
+        url: "http://localhost/zabbix/api_jsonrpc.php"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "user.update"
+          params:
+            userid: "1"
+            passwd: "{{ zabbix_admin_password }}"
+          id: 2
+          auth: "{{ zabbix_login_default.json.result }}"
+        status_code: 200
+      when:
+        - zabbix_login_default.json is defined
+        - zabbix_login_default.json.result is defined
+        - zabbix_login_default.json.error is not defined
+      no_log: true
+      changed_when: true
+
+    - name: Cerrar sesion API (token default)
+      ansible.builtin.uri:
+        url: "http://localhost/zabbix/api_jsonrpc.php"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "user.logout"
+          params: []
+          id: 3
+          auth: "{{ zabbix_login_default.json.result }}"
+        status_code: 200
+      when:
+        - zabbix_login_default.json is defined
+        - zabbix_login_default.json.result is defined
+        - zabbix_login_default.json.error is not defined
+      no_log: true
+
+    - name: Resumen de instalacion
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "Zabbix {{ zabbix_version }} instalado correctamente"
+          - "=========================================================="
+          - "URL: http://{{ zabbix_ip }}/zabbix"
+          - "Usuario: Admin"
+          - "Password: (definida en vault como vault_zabbix_admin_password)"
+          - "=========================================================="
+          - "PENDIENTE: Agregar registro DNS A en el DC Windows:"
+          - "  zabbix.norcom.internal -> {{ zabbix_ip }}"
+          - "=========================================================="
+
+  # ==========================================================================
+  # HANDLERS
+  # ==========================================================================
+  handlers:
+    - name: Restart zabbix-server
+      ansible.builtin.systemd:
+        name: zabbix-server
+        state: restarted
+
+    - name: Restart apache2
+      ansible.builtin.systemd:
+        name: apache2
+        state: restarted
+
+    - name: Restart systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+
+    - name: Restart cron
+      ansible.builtin.systemd:
+        name: cron
+        state: restarted
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
