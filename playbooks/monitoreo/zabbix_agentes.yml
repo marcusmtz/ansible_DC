@@ -95,9 +95,9 @@
         state: restarted
 
 # ==============================================================================
-# Play 2: Instalar Zabbix Agent 6.0 (clásico) en VoIP - Sangoma Linux 7 (RHEL 7)
-# - zabbix-agent2 requiere libpcre2 que no existe en RHEL 7
-# - zabbix-agent clásico es compatible con servidor Zabbix 7.0
+# Play 2: Instalar Zabbix Agent 5.0 LTS en VoIP - Sangoma Linux 7 (RHEL 7)
+# - zabbix-agent 6.0.x requiere libpcre2 que no existe en RHEL 7
+# - zabbix-agent 5.0 LTS no requiere libpcre2 y es compatible con server 7.0
 # - Solo raw porque RHEL 7 EOL no tiene Python 3 disponible
 # ==============================================================================
 - name: Instalar Zabbix Agent en VoIP Sangoma Linux 7
@@ -113,14 +113,18 @@
     # =========================================================================
     # REPOSITORIO Y PAQUETE
     # =========================================================================
-    - name: Instalar repositorio Zabbix 6.0
-      ansible.builtin.raw: |
-        rpm -q zabbix-release || \
-        rpm -ivh --nosignature \
-          https://repo.zabbix.com/zabbix/6.0/rhel/7/x86_64/zabbix-release-6.0-4.el7.noarch.rpm
+    - name: Eliminar repositorio Zabbix anterior si existe
+      ansible.builtin.raw: yum remove -y zabbix-release 2>/dev/null; true
       changed_when: false
 
-    - name: Instalar zabbix-agent (clasico, compatible con RHEL 7)
+    - name: Instalar repositorio Zabbix 5.0 LTS para RHEL 7
+      ansible.builtin.raw: |
+        rpm -q zabbix-release-5.0 2>/dev/null || \
+        rpm -ivh --nosignature \
+          https://repo.zabbix.com/zabbix/5.0/rhel/7/x86_64/zabbix-release-5.0-1.el7.noarch.rpm
+      changed_when: false
+
+    - name: Instalar zabbix-agent 5.0 (sin dependencia libpcre2)
       ansible.builtin.raw: >
         yum install -y zabbix-agent
         --disablerepo=sng-base,sng-updates,sng-extras,sng-epel,sng-pkgs
