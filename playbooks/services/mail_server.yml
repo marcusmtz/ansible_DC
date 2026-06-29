@@ -305,10 +305,25 @@
 
     # =========================================================================
     # POST-INSTALACION
-    # iRedMail ha instalado MariaDB, creado el esquema vmail y configurado
-    # todos los servicios. Root tiene la contrasena MYSQL_ROOT_PASSWORD
-    # y se conecta via socket (sin -h). vmailadmin conecta via TCP (127.0.0.1).
+    # En Ubuntu 24.04, MariaDB usa unix_socket para root por defecto.
+    # iRedMail instala todo correctamente pero no migra root a password auth.
+    # Lo migramos aqui antes de cualquier operacion con contrasena.
+    # vmailadmin conecta via TCP (127.0.0.1) segun MYSQL_GRANT_HOST.
     # =========================================================================
+    - name: Verificar si root MariaDB ya usa autenticacion por contrasena
+      ansible.builtin.shell: |
+        mysql -u root -p'{{ iredmail_admin_password }}' -e "SELECT 1;" > /dev/null 2>&1 && echo "password" || echo "socket"
+      changed_when: false
+      register: root_auth_method
+      no_log: true
+
+    - name: Migrar root MariaDB de unix_socket a autenticacion por contrasena
+      ansible.builtin.shell: |
+        mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '{{ iredmail_admin_password }}'; FLUSH PRIVILEGES;"
+      when: root_auth_method.stdout | trim == "socket"
+      changed_when: true
+      no_log: true
+
     - name: Verificar que iRedMail creo el esquema vmail correctamente
       ansible.builtin.shell: |
         mysql -u root -p'{{ iredmail_admin_password }}' vmail -sN -e \
