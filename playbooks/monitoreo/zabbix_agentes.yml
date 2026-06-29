@@ -112,7 +112,7 @@
     # PYTHON (necesario para que Ansible funcione en RHEL 7)
     # =========================================================================
     - name: Instalar Python 3 via raw (no requiere Python previo)
-      ansible.builtin.raw: yum install -y python3
+      ansible.builtin.raw: yum install -y python3 --disablerepo=sng-base,sng-updates,sng-extras,sng-epel
       changed_when: true
 
     # =========================================================================
@@ -128,6 +128,7 @@
       ansible.builtin.yum:
         name: zabbix-agent2
         state: present
+        disablerepo: "sng-base,sng-updates,sng-extras,sng-epel"
 
     # =========================================================================
     # CONFIGURACION
