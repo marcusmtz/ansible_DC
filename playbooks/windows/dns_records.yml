@@ -1,0 +1,76 @@
+---
+- name: Crear registros DNS en el DC Windows para el servidor de correo
+  hosts: windows_domain
+  gather_facts: false
+
+  vars:
+    dns_zone: "norcom.internal"
+    mail_name: "mail"
+    mail_ip: "192.168.10.9"
+    mail_fqdn: "mail.norcom.internal"
+    mx_priority: 10
+
+  tasks:
+
+    - name: Crear registro A para mail.norcom.internal
+      ansible.windows.win_shell: |
+        $existing = Get-DnsServerResourceRecord `
+          -ZoneName "{{ dns_zone }}" `
+          -Name "{{ mail_name }}" `
+          -RRType A `
+          -ErrorAction SilentlyContinue | Where-Object {
+            $_.RecordData.IPv4Address.ToString() -eq "{{ mail_ip }}"
+          }
+
+        if ($existing) {
+          Write-Output "EXISTS"
+        } else {
+          Add-DnsServerResourceRecordA `
+            -ZoneName "{{ dns_zone }}" `
+            -Name "{{ mail_name }}" `
+            -IPv4Address "{{ mail_ip }}" `
+            -TimeToLive "00:05:00"
+          Write-Output "CREATED"
+        }
+      register: dns_a_result
+      changed_when: "'CREATED' in dns_a_result.stdout"
+
+    - name: Crear registro MX para norcom.internal -> mail.norcom.internal
+      ansible.windows.win_shell: |
+        $existing = Get-DnsServerResourceRecord `
+          -ZoneName "{{ dns_zone }}" `
+          -Name "@" `
+          -RRType MX `
+          -ErrorAction SilentlyContinue | Where-Object {
+            $_.RecordData.MailExchange -eq "{{ mail_fqdn }}."
+          }
+
+        if ($existing) {
+          Write-Output "EXISTS"
+        } else {
+          Add-DnsServerResourceRecordMX `
+            -ZoneName "{{ dns_zone }}" `
+            -Name "@" `
+            -MailExchange "{{ mail_fqdn }}" `
+            -Preference {{ mx_priority }} `
+            -TimeToLive "00:05:00"
+          Write-Output "CREATED"
+        }
+      register: dns_mx_result
+      changed_when: "'CREATED' in dns_mx_result.stdout"
+
+    - name: Verificar registros creados
+      ansible.windows.win_shell: |
+        Write-Output "=== Registro A ==="
+        Get-DnsServerResourceRecord -ZoneName "{{ dns_zone }}" -Name "{{ mail_name }}" -RRType A |
+          Format-List HostName, RecordType, RecordData
+
+        Write-Output "=== Registro MX ==="
+        Get-DnsServerResourceRecord -ZoneName "{{ dns_zone }}" -Name "@" -RRType MX |
+          Format-List HostName, RecordType, RecordData
+      register: dns_verify
+      changed_when: false
+
+    - name: Mostrar registros DNS
+      ansible.builtin.debug:
+        var: dns_verify.stdout_lines
