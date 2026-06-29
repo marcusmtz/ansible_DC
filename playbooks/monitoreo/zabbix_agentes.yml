@@ -185,7 +185,6 @@
     zabbix_version: "7.0.13"
     zabbix_server_ip: "192.168.10.10"
     zabbix_agent_msi: "C:\\Temp\\zabbix_agent2.msi"
-    zabbix_conf: 'C:\Program Files\Zabbix Agent 2\zabbix_agent2.conf'
 
   tasks:
 
@@ -207,12 +206,7 @@
       ansible.windows.win_package:
         path: "{{ zabbix_agent_msi }}"
         state: present
-        arguments:
-          - /quiet
-          - /norestart
-          - "SERVER={{ zabbix_server_ip }}"
-          - "SERVERACTIVE={{ zabbix_server_ip }}"
-          - "HOSTNAME={{ inventory_hostname }}"
+        arguments: "/quiet /norestart SERVER={{ zabbix_server_ip }} SERVERACTIVE={{ zabbix_server_ip }} HOSTNAME={{ inventory_hostname }}"
 
     # =========================================================================
     # FIREWALL WINDOWS
