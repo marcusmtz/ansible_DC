@@ -204,19 +204,17 @@
       register: mailcow_dbpass
       no_log: true
 
-    - name: Debug estructura de tablas API en Mailcow
+    - name: Registrar API key en base de datos de Mailcow
       ansible.builtin.shell: |
         docker compose exec -T mysql-mailcow mysql \
           -u mailcow -p'{{ mailcow_dbpass.stdout | trim }}' mailcow -e \
-          "SHOW TABLES LIKE '%api%'; DESCRIBE api;"
+          "INSERT INTO api (api_key, allow_from, skip_ip_check, access, active)
+           VALUES ('{{ mailcow_api_key }}', '*', 1, 'rw', 1)
+           ON DUPLICATE KEY UPDATE allow_from='*', skip_ip_check=1, access='rw', active=1;"
       args:
         chdir: "{{ mailcow_install_dir }}"
-      changed_when: false
-      register: api_schema
-
-    - name: Mostrar estructura tabla api
-      ansible.builtin.debug:
-        var: api_schema.stdout_lines
+      changed_when: true
+      no_log: true
 
     - name: Esperar a que la API de Mailcow este lista
       ansible.builtin.uri:
