@@ -1,0 +1,370 @@
+---
+- name: Instalar Mailcow Dockerized en Ubuntu Server 24.04
+  hosts: ubuntu_mail
+  become: true
+
+  vars:
+    hostname_mail: mail
+    domain_mail: norcom.internal
+    fqdn: "{{ hostname_mail }}.{{ domain_mail }}"
+    mail_ip: "192.168.10.9"
+    dns_master_ip: "192.168.10.5"
+    dns_secondary_ip: "192.168.10.6"
+    ldap_server: "192.168.10.5"
+    ldap_base_dn: "DC=norcom,DC=internal"
+    ldap_bind_dn: "CN=Administrador,CN=Users,DC=norcom,DC=internal"
+    ldap_bind_password: "PasswordDelAdministradorAD"
+
+    mailcow_install_dir: /opt/mailcow-dockerized
+    mailcow_tz: "America/Lima"
+    mailcow_admin_password: "AdminMailcow2026!"
+
+    # Clave fija para la API de Mailcow (usada por Ansible para crear dominios y buzones)
+    mailcow_api_key: "ansible-mailcow-norcom-2026"
+
+    mail_users:
+      - username: admin1
+        display_name: "Admin Uno"
+      - username: admin2
+        display_name: "Admin Dos"
+      - username: ti1
+        display_name: "TI Uno"
+      - username: ti2
+        display_name: "TI Dos"
+      - username: ventas1
+        display_name: "Ventas Uno"
+      - username: ventas2
+        display_name: "Ventas Dos"
+
+  tasks:
+
+    # =========================================================================
+    # SISTEMA BASE
+    # =========================================================================
+    - name: Actualizar paquetes
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: safe
+      register: apt_result
+      until: apt_result is succeeded
+      retries: 5
+      delay: 10
+
+    - name: Instalar dependencias base
+      ansible.builtin.apt:
+        name:
+          - git
+          - curl
+          - wget
+          - ca-certificates
+          - gnupg
+          - ufw
+          - net-tools
+          - python3
+          - ntp
+        state: present
+
+    - name: Configurar timezone
+      ansible.builtin.timezone:
+        name: "{{ mailcow_tz }}"
+
+    # =========================================================================
+    # RED Y NOMBRE DE HOST
+    # =========================================================================
+    - name: Configurar hostname como FQDN
+      ansible.builtin.hostname:
+        name: "{{ fqdn }}"
+
+    - name: Configurar /etc/hosts - servidor de correo
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "^{{ mail_ip }}\\s"
+        line: "{{ mail_ip }} {{ fqdn }} {{ hostname_mail }}"
+
+    - name: Crear directorio drop-in para systemd-resolved
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: '0755'
+
+    - name: Configurar split-DNS en systemd-resolved
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/mailcow-dns.conf
+        mode: '0644'
+        content: |
+          [Resolve]
+          DNS={{ dns_master_ip }} {{ dns_secondary_ip }}
+          FallbackDNS=8.8.8.8 1.1.1.1
+          Domains=~{{ domain_mail }}
+
+    - name: Reiniciar systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+
+    # =========================================================================
+    # DOCKER ENGINE (repo oficial, no el de Ubuntu)
+    # =========================================================================
+    - name: Crear directorio para keyrings de apt
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Descargar clave GPG de Docker
+      ansible.builtin.shell: |
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Agregar repositorio de Docker
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        filename: docker
+
+    - name: Instalar Docker Engine y Docker Compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Habilitar y arrancar Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    # =========================================================================
+    # MAILCOW DOCKERIZED
+    # =========================================================================
+    - name: Clonar repositorio mailcow-dockerized
+      ansible.builtin.git:
+        repo: https://github.com/mailcow/mailcow-dockerized.git
+        dest: "{{ mailcow_install_dir }}"
+        depth: 1
+        force: false
+
+    - name: Generar configuracion de Mailcow
+      ansible.builtin.shell:
+        cmd: bash generate_config.sh
+        chdir: "{{ mailcow_install_dir }}"
+      environment:
+        MAILCOW_HOSTNAME: "{{ fqdn }}"
+        MAILCOW_TZ: "{{ mailcow_tz }}"
+      args:
+        creates: "{{ mailcow_install_dir }}/mailcow.conf"
+
+    - name: Deshabilitar Let's Encrypt (dominio interno)
+      ansible.builtin.lineinfile:
+        path: "{{ mailcow_install_dir }}/mailcow.conf"
+        regexp: "^SKIP_LETS_ENCRYPT="
+        line: "SKIP_LETS_ENCRYPT=y"
+
+    - name: Descargar imagenes Docker de Mailcow
+      ansible.builtin.shell:
+        cmd: docker compose pull
+        chdir: "{{ mailcow_install_dir }}"
+      changed_when: true
+      timeout: 1800
+
+    - name: Iniciar stack Mailcow
+      ansible.builtin.shell:
+        cmd: docker compose up -d
+        chdir: "{{ mailcow_install_dir }}"
+      args:
+        creates: "{{ mailcow_install_dir }}/data/conf/postfix/main.cf"
+      changed_when: true
+
+    - name: Esperar a que Mailcow este disponible (2-3 minutos)
+      ansible.builtin.wait_for:
+        host: "{{ mail_ip }}"
+        port: 443
+        timeout: 300
+
+    # =========================================================================
+    # POST-INSTALACION: DOMINIO Y BUZONES VIA API REST DE MAILCOW
+    #
+    # Mailcow no expone la API key en mailcow.conf. La insertamos directamente
+    # en la base de datos del contenedor MySQL para poder usar la API REST.
+    # Los buzones se crean con password dummy porque el login va por LDAP/AD.
+    # =========================================================================
+    - name: Leer DBPASS de mailcow.conf
+      ansible.builtin.shell: |
+        grep "^DBPASS=" {{ mailcow_install_dir }}/mailcow.conf | cut -d'=' -f2
+      changed_when: false
+      register: mailcow_dbpass
+      no_log: true
+
+    - name: Registrar API key en base de datos de Mailcow
+      ansible.builtin.shell: |
+        docker compose exec -T mysql-mailcow mysql \
+          -u mailcow -p'{{ mailcow_dbpass.stdout | trim }}' mailcow -e \
+          "INSERT INTO api (username, api_key, active, allow_from)
+           VALUES ('admin', '{{ mailcow_api_key }}', 1, '*')
+           ON DUPLICATE KEY UPDATE api_key='{{ mailcow_api_key }}', allow_from='*';"
+      args:
+        chdir: "{{ mailcow_install_dir }}"
+      changed_when: true
+      no_log: true
+
+    - name: Esperar a que la API de Mailcow este lista
+      ansible.builtin.uri:
+        url: "https://{{ mail_ip }}/api/v1/get/domain/all"
+        method: GET
+        headers:
+          X-API-Key: "{{ mailcow_api_key }}"
+        validate_certs: false
+        status_code: 200
+      register: api_check
+      until: api_check.status == 200
+      retries: 12
+      delay: 15
+
+    - name: Crear dominio en Mailcow
+      ansible.builtin.uri:
+        url: "https://{{ mail_ip }}/api/v1/add/domain"
+        method: POST
+        headers:
+          X-API-Key: "{{ mailcow_api_key }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          domain: "{{ domain_mail }}"
+          description: "Norcom Internal"
+          aliases: 400
+          mailboxes: 50
+          maxquota: 51200
+          quota: 51200
+          active: "1"
+          backupmx: "0"
+          relay_all_recipients: "0"
+        validate_certs: false
+        status_code: [200, 299]
+      register: domain_result
+      changed_when: domain_result.json[0].type is defined and domain_result.json[0].type == "success"
+
+    - name: Crear buzon para cada usuario AD
+      ansible.builtin.uri:
+        url: "https://{{ mail_ip }}/api/v1/add/mailbox"
+        method: POST
+        headers:
+          X-API-Key: "{{ mailcow_api_key }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          local_part: "{{ item.username }}"
+          domain: "{{ domain_mail }}"
+          name: "{{ item.display_name }}"
+          password: "{{ mailcow_api_key }}{{ item.username }}"
+          password2: "{{ mailcow_api_key }}{{ item.username }}"
+          quota: "1024"
+          active: "1"
+          force_pw_update: "0"
+        validate_certs: false
+        status_code: [200, 299]
+      loop: "{{ mail_users }}"
+      register: mailbox_result
+      changed_when: mailbox_result.json[0].type is defined and mailbox_result.json[0].type == "success"
+      no_log: true
+
+    - name: Cambiar contrasena del admin de Mailcow
+      ansible.builtin.shell: |
+        docker compose exec -T mysql-mailcow mysql \
+          -u mailcow -p'{{ mailcow_dbpass.stdout | trim }}' mailcow -e \
+          "UPDATE admin SET password='{SSHA256}$(echo -n '{{ mailcow_admin_password }}' | sha256sum | cut -d' ' -f1)' WHERE username='admin';"
+      args:
+        chdir: "{{ mailcow_install_dir }}"
+      changed_when: true
+      no_log: true
+
+    # =========================================================================
+    # FIREWALL
+    # =========================================================================
+    - name: Permitir SSH
+      ansible.builtin.ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: Permitir HTTP
+      ansible.builtin.ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Permitir HTTPS
+      ansible.builtin.ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+
+    - name: Permitir SMTP
+      ansible.builtin.ufw:
+        rule: allow
+        port: '25'
+        proto: tcp
+
+    - name: Permitir SMTP Submission
+      ansible.builtin.ufw:
+        rule: allow
+        port: '587'
+        proto: tcp
+
+    - name: Permitir SMTPS
+      ansible.builtin.ufw:
+        rule: allow
+        port: '465'
+        proto: tcp
+
+    - name: Permitir IMAP
+      ansible.builtin.ufw:
+        rule: allow
+        port: '143'
+        proto: tcp
+
+    - name: Permitir IMAPS
+      ansible.builtin.ufw:
+        rule: allow
+        port: '993'
+        proto: tcp
+
+    - name: Habilitar UFW
+      ansible.builtin.ufw:
+        state: enabled
+
+    # =========================================================================
+    # INSTRUCCIONES FINALES
+    # =========================================================================
+    - name: Instrucciones de acceso y configuracion LDAP
+      ansible.builtin.debug:
+        msg:
+          - "============================================================"
+          - "  Mailcow instalado y configurado"
+          - "============================================================"
+          - "  Panel admin: https://{{ fqdn }}"
+          - "  Usuario:     admin"
+          - "  Contrasena:  {{ mailcow_admin_password }}"
+          - "  Webmail:     https://{{ fqdn }}/SOGo"
+          - "============================================================"
+          - "  PASO MANUAL: Configurar LDAP/AD para autenticacion"
+          - "  Ir a: System → Configuration → Access → LDAP"
+          - ""
+          - "  LDAP Status:     Active"
+          - "  LDAP Hostname:   {{ ldap_server }}"
+          - "  LDAP Port:       389"
+          - "  LDAP Base DN:    {{ ldap_base_dn }}"
+          - "  LDAP Bind DN:    {{ ldap_bind_dn }}"
+          - "  LDAP Bind Pass:  [contrasena del Administrador AD]"
+          - "  LDAP Filter:     (&(objectClass=person)(sAMAccountName=%u))"
+          - ""
+          - "  REGISTROS DNS a crear en el DC Windows:"
+          - "    A record:  {{ fqdn }} -> {{ mail_ip }}"
+          - "    MX record: {{ domain_mail }} -> {{ fqdn }} (prioridad 10)"
+          - "============================================================"
