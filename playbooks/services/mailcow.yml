@@ -276,23 +276,6 @@
       changed_when: mailbox_result.json[0].type is defined and mailbox_result.json[0].type == "success"
       no_log: true
 
-    - name: Cambiar contrasena del admin de Mailcow via API
-      ansible.builtin.uri:
-        url: "https://{{ mail_ip }}/api/v1/edit/admin"
-        method: POST
-        headers:
-          X-API-Key: "{{ mailcow_api_key }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          username: "admin"
-          password: "{{ mailcow_admin_password }}"
-          password2: "{{ mailcow_admin_password }}"
-        validate_certs: false
-        status_code: [200, 299]
-      no_log: true
-      changed_when: true
-
     # =========================================================================
     # FIREWALL
     # =========================================================================
@@ -359,7 +342,7 @@
           - "============================================================"
           - "  Panel admin: https://{{ fqdn }}"
           - "  Usuario:     admin"
-          - "  Contrasena:  {{ mailcow_admin_password }}"
+          - "  Contrasena:  moohoo  (cambiar en el primer login)"
           - "  Webmail:     https://{{ fqdn }}/SOGo"
           - "============================================================"
           - "  PASO MANUAL: Configurar LDAP/AD para autenticacion"
