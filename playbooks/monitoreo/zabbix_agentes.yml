@@ -113,24 +113,17 @@
     # =========================================================================
     # REPOSITORIO Y PAQUETE
     # =========================================================================
-    - name: Eliminar archivos de repositorio Zabbix anteriores
-      ansible.builtin.raw: rm -f /etc/yum.repos.d/zabbix*.repo; rpm -e zabbix-release 2>/dev/null; true
+    - name: Descargar RPM de zabbix-agent 5.0 directamente
+      ansible.builtin.raw: |
+        rpm -q zabbix-agent 2>/dev/null && exit 0
+        curl -fsSL -o /tmp/zabbix-agent-5.0.noarch.rpm \
+          https://repo.zabbix.com/zabbix/5.0/rhel/7/x86_64/zabbix-agent-5.0.44-1.el7.x86_64.rpm
       changed_when: false
 
-    - name: Limpiar cache de yum
-      ansible.builtin.raw: yum clean all
-      changed_when: false
-
-    - name: Instalar repositorio Zabbix 5.0 LTS para RHEL 7
-      ansible.builtin.raw: >
-        rpm -ivh --nosignature
-        https://repo.zabbix.com/zabbix/5.0/rhel/7/x86_64/zabbix-release-5.0-1.el7.noarch.rpm
-      changed_when: false
-
-    - name: Instalar zabbix-agent 5.0 (sin dependencia libpcre2)
-      ansible.builtin.raw: >
-        yum install -y zabbix-agent
-        --disablerepo=sng-base,sng-updates,sng-extras,sng-epel,sng-pkgs
+    - name: Instalar zabbix-agent 5.0 via rpm (sin yum ni versionlock)
+      ansible.builtin.raw: |
+        rpm -q zabbix-agent 2>/dev/null && exit 0
+        rpm -ivh --nosignature /tmp/zabbix-agent-5.0.noarch.rpm
       changed_when: false
 
     # =========================================================================
