@@ -69,7 +69,7 @@
       notify: Restart zabbix-agent2
 
     # =========================================================================
-    # FIREWALL UFW (solo en servidores, no en routers que usan iptables)
+    # FIREWALL UFW (servidores) / iptables (routers)
     # =========================================================================
     - name: Permitir puerto Zabbix Agent en UFW
       community.general.ufw:
@@ -78,6 +78,22 @@
         proto: tcp
         src: "{{ zabbix_server_ip }}"
       when: inventory_hostname not in groups['ubuntu_routers']
+
+    - name: Permitir puerto 10050 en iptables para routers
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: '10050'
+        source: "{{ zabbix_server_ip }}"
+        jump: ACCEPT
+        state: present
+      when: inventory_hostname in groups['ubuntu_routers']
+
+    - name: Guardar reglas iptables en routers
+      ansible.builtin.shell: iptables-save > /etc/iptables/rules.v4
+      args:
+        creates: /etc/iptables/rules.v4
+      when: inventory_hostname in groups['ubuntu_routers']
 
     # =========================================================================
     # SERVICIO
