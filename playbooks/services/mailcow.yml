@@ -154,7 +154,7 @@
 
     - name: Generar configuracion de Mailcow
       ansible.builtin.shell:
-        cmd: bash generate_config.sh
+        cmd: "yes '' | bash generate_config.sh"
         chdir: "{{ mailcow_install_dir }}"
       environment:
         MAILCOW_HOSTNAME: "{{ fqdn }}"
