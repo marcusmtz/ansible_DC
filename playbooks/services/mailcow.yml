@@ -151,6 +151,7 @@
         dest: "{{ mailcow_install_dir }}"
         depth: 1
         force: false
+        update: false
 
     - name: Generar configuracion de Mailcow
       ansible.builtin.shell:
