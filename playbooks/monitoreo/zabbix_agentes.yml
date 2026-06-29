@@ -109,6 +109,21 @@
   tasks:
 
     # =========================================================================
+    # PYTHON 3 via EPEL oficial (repos de Sangoma están caídos)
+    # =========================================================================
+    - name: Instalar EPEL desde repositorio oficial de CentOS
+      ansible.builtin.raw: |
+        rpm -q epel-release || \
+        rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+      changed_when: false
+
+    - name: Instalar Python 3 desde EPEL oficial
+      ansible.builtin.raw: |
+        python3 --version 2>/dev/null || \
+        yum install -y python3 --disablerepo=sng-base,sng-updates,sng-extras,sng-epel,sng-pkgs
+      changed_when: false
+
+    # =========================================================================
     # REPOSITORIO Y PAQUETE
     # =========================================================================
     - name: Instalar repositorio Zabbix 6.0 para RHEL 7
