@@ -147,10 +147,14 @@
     # =========================================================================
     # FIREWALL
     # =========================================================================
-    - name: Abrir puerto 10050 en firewalld
+    - name: Abrir puerto 10050 en firewalld si esta activo
       ansible.builtin.raw: |
-        firewall-cmd --permanent --add-port=10050/tcp
-        firewall-cmd --reload
+        if systemctl is-active --quiet firewalld; then
+          firewall-cmd --permanent --add-port=10050/tcp
+          firewall-cmd --reload
+        else
+          echo "firewalld no activo, puerto 10050 accesible sin restricciones"
+        fi
       changed_when: false
 
     # =========================================================================
