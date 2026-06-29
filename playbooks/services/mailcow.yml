@@ -2,6 +2,7 @@
 - name: Instalar Mailcow Dockerized en Ubuntu Server 24.04
   hosts: ubuntu_mail
   become: true
+  gather_facts: true
 
   vars:
     hostname_mail: mail
