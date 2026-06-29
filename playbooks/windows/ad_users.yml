@@ -9,6 +9,8 @@
       - TI
       - Ventas
 
+    domain_mail: norcom.internal
+
     ad_users:
       - name: admin1
         firstname: Admin
@@ -56,6 +58,7 @@
         firstname: "{{ item.firstname }}"
         surname: "{{ item.surname }}"
         password: "{{ item.password }}"
+        email: "{{ item.name }}@{{ domain_mail }}"
         update_password: on_create
         enabled: true
         groups:
