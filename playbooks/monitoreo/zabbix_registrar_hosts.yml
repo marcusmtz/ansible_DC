@@ -1,0 +1,360 @@
+---
+- name: Registrar hosts en Zabbix via API REST
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    zabbix_url: "http://192.168.10.10/zabbix/api_jsonrpc.php"
+    zabbix_user: "Admin"
+    zabbix_password: "{{ vault_zabbix_admin_password }}"
+
+    linux_hosts:
+      - name: dns2
+        ip: "192.168.10.6"
+      - name: uburomas
+        ip: "192.168.10.2"
+      - name: uburoba
+        ip: "192.168.10.3"
+      - name: ubufs
+        ip: "192.168.10.7"
+      - name: ubumail
+        ip: "192.168.10.9"
+
+    windows_hosts:
+      - name: win1
+        ip: "192.168.10.5"
+
+    voip_hosts:
+      - name: voip1
+        ip: "192.168.10.8"
+
+  tasks:
+
+    # =========================================================================
+    # LOGIN
+    # =========================================================================
+    - name: Login a la API de Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "user.login"
+          params:
+            username: "{{ zabbix_user }}"
+            password: "{{ zabbix_password }}"
+          id: 1
+        status_code: 200
+      register: zabbix_login
+      no_log: true
+
+    - name: Guardar token de autenticacion
+      ansible.builtin.set_fact:
+        zabbix_auth: "{{ zabbix_login.json.result }}"
+
+    # =========================================================================
+    # GRUPOS DE HOSTS
+    # =========================================================================
+    - name: Obtener o crear grupo Linux Servers
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "hostgroup.get"
+          params:
+            filter:
+              name: ["Linux Servers"]
+          auth: "{{ zabbix_auth }}"
+          id: 2
+        status_code: 200
+      register: group_linux_get
+
+    - name: Crear grupo Linux Servers si no existe
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "hostgroup.create"
+          params:
+            name: "Linux Servers"
+          auth: "{{ zabbix_auth }}"
+          id: 3
+        status_code: 200
+      register: group_linux_create
+      when: group_linux_get.json.result | length == 0
+
+    - name: Guardar ID grupo Linux Servers
+      ansible.builtin.set_fact:
+        group_linux_id: >-
+          {{ group_linux_get.json.result[0].groupid
+             if group_linux_get.json.result | length > 0
+             else group_linux_create.json.result.groupids[0] }}
+
+    - name: Obtener grupo Windows Servers
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "hostgroup.get"
+          params:
+            filter:
+              name: ["Windows Servers"]
+          auth: "{{ zabbix_auth }}"
+          id: 4
+        status_code: 200
+      register: group_windows_get
+
+    - name: Crear grupo Windows Servers si no existe
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "hostgroup.create"
+          params:
+            name: "Windows Servers"
+          auth: "{{ zabbix_auth }}"
+          id: 5
+        status_code: 200
+      register: group_windows_create
+      when: group_windows_get.json.result | length == 0
+
+    - name: Guardar ID grupo Windows Servers
+      ansible.builtin.set_fact:
+        group_windows_id: >-
+          {{ group_windows_get.json.result[0].groupid
+             if group_windows_get.json.result | length > 0
+             else group_windows_create.json.result.groupids[0] }}
+
+    # =========================================================================
+    # TEMPLATES
+    # =========================================================================
+    - name: Obtener ID template Linux by Zabbix agent
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "template.get"
+          params:
+            filter:
+              host: ["Linux by Zabbix agent"]
+          auth: "{{ zabbix_auth }}"
+          id: 6
+        status_code: 200
+      register: template_linux
+
+    - name: Obtener ID template Windows by Zabbix agent
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "template.get"
+          params:
+            filter:
+              host: ["Windows by Zabbix agent"]
+          auth: "{{ zabbix_auth }}"
+          id: 7
+        status_code: 200
+      register: template_windows
+
+    - name: Guardar IDs de templates
+      ansible.builtin.set_fact:
+        template_linux_id: "{{ template_linux.json.result[0].templateid }}"
+        template_windows_id: "{{ template_windows.json.result[0].templateid }}"
+        template_voip_id: "{{ template_linux.json.result[0].templateid }}"
+
+    # =========================================================================
+    # REGISTRAR HOSTS LINUX
+    # =========================================================================
+    - name: Verificar si el host Linux ya existe en Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "host.get"
+          params:
+            filter:
+              host: ["{{ item.name }}"]
+          auth: "{{ zabbix_auth }}"
+          id: 10
+        status_code: 200
+      register: linux_host_check
+      loop: "{{ linux_hosts }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Registrar hosts Linux en Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "host.create"
+          params:
+            host: "{{ item.item.name }}"
+            interfaces:
+              - type: 1
+                main: 1
+                useip: 1
+                ip: "{{ item.item.ip }}"
+                dns: ""
+                port: "10050"
+            groups:
+              - groupid: "{{ group_linux_id }}"
+            templates:
+              - templateid: "{{ template_linux_id }}"
+          auth: "{{ zabbix_auth }}"
+          id: 11
+        status_code: 200
+      loop: "{{ linux_host_check.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: item.json.result | length == 0
+      changed_when: true
+
+    # =========================================================================
+    # REGISTRAR HOSTS WINDOWS
+    # =========================================================================
+    - name: Verificar si el host Windows ya existe en Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "host.get"
+          params:
+            filter:
+              host: ["{{ item.name }}"]
+          auth: "{{ zabbix_auth }}"
+          id: 20
+        status_code: 200
+      register: windows_host_check
+      loop: "{{ windows_hosts }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Registrar hosts Windows en Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "host.create"
+          params:
+            host: "{{ item.item.name }}"
+            interfaces:
+              - type: 1
+                main: 1
+                useip: 1
+                ip: "{{ item.item.ip }}"
+                dns: ""
+                port: "10050"
+            groups:
+              - groupid: "{{ group_windows_id }}"
+            templates:
+              - templateid: "{{ template_windows_id }}"
+          auth: "{{ zabbix_auth }}"
+          id: 21
+        status_code: 200
+      loop: "{{ windows_host_check.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: item.json.result | length == 0
+      changed_when: true
+
+    # =========================================================================
+    # REGISTRAR HOST VOIP
+    # =========================================================================
+    - name: Verificar si el host VoIP ya existe en Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "host.get"
+          params:
+            filter:
+              host: ["{{ item.name }}"]
+          auth: "{{ zabbix_auth }}"
+          id: 30
+        status_code: 200
+      register: voip_host_check
+      loop: "{{ voip_hosts }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Registrar host VoIP en Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "host.create"
+          params:
+            host: "{{ item.item.name }}"
+            interfaces:
+              - type: 1
+                main: 1
+                useip: 1
+                ip: "{{ item.item.ip }}"
+                dns: ""
+                port: "10050"
+            groups:
+              - groupid: "{{ group_linux_id }}"
+            templates:
+              - templateid: "{{ template_voip_id }}"
+          auth: "{{ zabbix_auth }}"
+          id: 31
+        status_code: 200
+      loop: "{{ voip_host_check.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: item.json.result | length == 0
+      changed_when: true
+
+    # =========================================================================
+    # LOGOUT
+    # =========================================================================
+    - name: Cerrar sesion API de Zabbix
+      ansible.builtin.uri:
+        url: "{{ zabbix_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "user.logout"
+          params: []
+          auth: "{{ zabbix_auth }}"
+          id: 99
+        status_code: 200
+      no_log: true
+
+    - name: Resumen de hosts registrados
+      ansible.builtin.debug:
+        msg:
+          - "Hosts registrados en Zabbix:"
+          - "  Linux  : dns2, uburomas, uburoba, ubufs, ubumail"
+          - "  Windows: win1"
+          - "  VoIP   : voip1"
+          - ""
+          - "Accede a http://192.168.10.10/zabbix -> Monitoring -> Hosts para verificar"
