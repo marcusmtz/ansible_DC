@@ -214,7 +214,6 @@
       args:
         chdir: "{{ mailcow_install_dir }}"
       changed_when: true
-      no_log: true
 
     - name: Esperar a que la API de Mailcow este lista
       ansible.builtin.uri:
