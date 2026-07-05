@@ -72,8 +72,8 @@
         net ads keytab create -U {{ domain_admin }}%{{ domain_admin_password }}
       args:
         executable: /bin/bash
-      changed_when: false
-      failed_when: false
+      register: keytab_create
+      changed_when: "'Success' in keytab_create.stdout or keytab_create.rc == 0"
 
     - name: Verificar keytab funciona
       ansible.builtin.shell: |
@@ -83,7 +83,6 @@
         executable: /bin/bash
       register: keytab_check
       changed_when: false
-      failed_when: false
 
     - name: Configurar nsswitch passwd con sss
       ansible.builtin.lineinfile:
@@ -96,6 +95,13 @@
         path: /etc/nsswitch.conf
         regexp: '^group:'
         line: 'group:          files sss'
+
+    - name: Configurar nsswitch con winbind
+      ansible.builtin.lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^passwd:.*winbind'
+        line: 'passwd:         files sss winbind'
+      failed_when: false
 
     - name: Reiniciar SSSD para aplicar configuracion del dominio
       ansible.builtin.systemd:
@@ -111,14 +117,15 @@
 
     - name: Verificar estado de SSSD
       ansible.builtin.shell: |
-        if systemctl is-active --quiet sssd; then
-          echo "SSSD_OK"
-        else
-          echo "SSSD_FAILED"
+        for i in 1 2 3; do
+          if systemctl is-active --quiet sssd; then
+            echo "SSSD_OK"
+            exit 0
+          fi
           systemctl restart sssd || true
           sleep 2
-          if systemctl is-active --quiet sssd; then echo "SSSD_OK"; else echo "SSSD_FAILED"; fi
-        fi
+        done
+        echo "SSSD_FAILED"
       args:
         executable: /bin/bash
       register: sssd_status
@@ -130,15 +137,17 @@
         enabled: true
         state: started
 
-    - name: Verificar winbind corriendo
+    - name: Verificar winbind corriendo con reintentos
       ansible.builtin.shell: |
-        if systemctl is-active --quiet winbind; then
-          echo "WINBIND_OK"
-        else
+        for i in 1 2 3; do
+          if systemctl is-active --quiet winbind; then
+            echo "WINBIND_OK"
+            exit 0
+          fi
           systemctl restart winbind || true
           sleep 2
-          if systemctl is-active --quiet winbind; then echo "WINBIND_OK"; else echo "WINBIND_FAILED"; fi
-        fi
+        done
+        echo "WINBIND_FAILED"
       args:
         executable: /bin/bash
       register: winbind_status
@@ -153,7 +162,7 @@
         mode: "0770"
       loop: "{{ smb_shares }}"
 
-    - name: Configurar Samba para Active Directory con SSSD
+    - name: Configurar Samba para Active Directory con winbind
       ansible.builtin.copy:
         dest: /etc/samba/smb.conf
         owner: root
@@ -168,6 +177,11 @@
               idmap config * : backend = tdb
               idmap config * : range = 10000-99999
 
+              winbind use default domain = yes
+              winbind offline logon = false
+              winbind enum users = yes
+              winbind enum groups = yes
+
               template shell = /bin/bash
               template homedir = /home/%U
 
@@ -180,37 +194,88 @@
               browseable = yes
               read only = no
               guest ok = no
-              valid users = @"{{ share.group }}@{{ domain }}"
+              valid users = +"{{ share.group }}"
               create mask = 0660
               directory mask = 0770
 
           {% endfor %}
-      notify: [Restart samba, Restart winbind]
 
     - name: Validar configuracion de Samba
       ansible.builtin.command: testparm -s
       register: samba_config_test
       changed_when: false
 
-    - name: Habilitar y arrancar smbd
-      ansible.builtin.service:
+    - name: Reiniciar smbd si cambio configuracion
+      ansible.builtin.systemd:
         name: smbd
+        state: restarted
         enabled: true
-        state: started
+
+    - name: Verificar smbd activo
+      ansible.builtin.shell: |
+        for i in 1 2 3; do
+          if systemctl is-active --quiet smbd; then
+            echo "SMB_OK"
+            exit 0
+          fi
+          systemctl restart smbd || true
+          sleep 2
+        done
+        echo "SMB_FAILED"
+      args:
+        executable: /bin/bash
+      register: smbd_status
+      changed_when: false
+
+    - name: Reiniciar winbind si cambio configuracion
+      ansible.builtin.systemd:
+        name: winbind
+        state: restarted
+        enabled: true
+
+    - name: Verificar winbind post-reinicio
+      ansible.builtin.shell: |
+        for i in 1 2 3; do
+          if systemctl is-active --quiet winbind; then
+            echo "WINBIND_OK"
+            exit 0
+          fi
+          systemctl restart winbind || true
+          sleep 2
+        done
+        journalctl -xeu winbind.service --no-pager -l | tail -15
+        echo "WINBIND_FAILED"
+      args:
+        executable: /bin/bash
+      register: winbind_final
+      changed_when: false
+
+    - name: Verificar estado final del join
+      ansible.builtin.shell: |
+        echo "=== realm list ==="
+        realm list
+        echo "=== net ads testjoin ==="
+        net ads testjoin
+        echo "=== smbd ==="
+        systemctl is-active smbd
+        echo "=== winbind ==="
+        systemctl is-active winbind
+      args:
+        executable: /bin/bash
+      register: final_status
+      changed_when: false
+
+    - name: Mostrar resumen
+      ansible.builtin.debug:
+        msg:
+          - "SSSD: {{ sssd_status.stdout }}"
+          - "Winbind inicial: {{ winbind_status.stdout }}"
+          - "Samba config: {{ samba_config_test.stdout_lines | last }}"
+          - "Winbind final: {{ winbind_final.stdout }}"
+          - "Estado final: {{ final_status.stdout }}"
 
     - name: Permitir Samba en UFW si esta activo
       ansible.builtin.command: ufw allow Samba
       register: ufw_samba
       changed_when: "'Rule added' in ufw_samba.stdout or 'updated' in ufw_samba.stdout"
       failed_when: false
-
-  handlers:
-    - name: Restart samba
-      ansible.builtin.service:
-        name: smbd
-        state: restarted
-
-    - name: Restart winbind
-      ansible.builtin.service:
-        name: winbind
-        state: restarted
