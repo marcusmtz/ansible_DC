@@ -14,6 +14,15 @@
       - name: CompartidoVentas
         path: /srv/samba/ventas
         group: Ventas
+      - name: CompartidoAdminAqp
+        path: /srv/samba/admin_aqp
+        group: Administracion Arequipa
+      - name: CompartidoVentasAqp
+        path: /srv/samba/ventas_aqp
+        group: Ventas Arequipa
+      - name: CompartidoContabilidadAqp
+        path: /srv/samba/contabilidad_aqp
+        group: Contabilidad Arequipa
     domain: norcom.internal
     domain_upper: NORCOM
     domain_admin: Administrador

@@ -1,0 +1,68 @@
+---
+- name: Crear usuarios y grupos para Arequipa en Active Directory
+  hosts: windows_domain
+  gather_facts: false
+
+  vars:
+    ad_groups_arequipa:
+      - "Administracion Arequipa"
+      - "Ventas Arequipa"
+      - "Contabilidad Arequipa"
+
+    domain_mail: norcom.internal
+
+    ad_users_arequipa:
+      - name: adminaqp1
+        firstname: AdminAqp
+        surname: Uno
+        password: "Norcom@2026!"
+        group: "Administracion Arequipa"
+      - name: adminaqp2
+        firstname: AdminAqp
+        surname: Dos
+        password: "Norcom@2026!"
+        group: "Administracion Arequipa"
+      - name: ventasaqp1
+        firstname: VentasAqp
+        surname: Uno
+        password: "Norcom@2026!"
+        group: "Ventas Arequipa"
+      - name: ventasaqp2
+        firstname: VentasAqp
+        surname: Dos
+        password: "Norcom@2026!"
+        group: "Ventas Arequipa"
+      - name: contaqp1
+        firstname: ContaAqp
+        surname: Uno
+        password: "Norcom@2026!"
+        group: "Contabilidad Arequipa"
+      - name: contaqp2
+        firstname: ContaAqp
+        surname: Dos
+        password: "Norcom@2026!"
+        group: "Contabilidad Arequipa"
+
+  tasks:
+    - name: Crear grupos de seguridad Arequipa
+      microsoft.ad.group:
+        name: "{{ item }}"
+        scope: global
+        category: security
+        state: present
+      loop: "{{ ad_groups_arequipa }}"
+
+    - name: Crear usuarios Arequipa en AD
+      microsoft.ad.user:
+        name: "{{ item.name }}"
+        firstname: "{{ item.firstname }}"
+        surname: "{{ item.surname }}"
+        password: "{{ item.password }}"
+        email: "{{ item.name }}@{{ domain_mail }}"
+        update_password: on_create
+        enabled: true
+        groups:
+          add:
+            - "{{ item.group }}"
+        state: present
+      loop: "{{ ad_users_arequipa }}"
