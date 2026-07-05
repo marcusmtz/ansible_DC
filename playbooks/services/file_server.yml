@@ -67,6 +67,19 @@
       register: samba_join
       changed_when: "'SAMBACREATED' in samba_join.stdout"
 
+    - name: Crear smb.conf temporal para keytab
+      ansible.builtin.copy:
+        dest: /etc/samba/smb.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [global]
+              workgroup = {{ domain_upper }}
+              realm = {{ domain | upper }}
+              security = ADS
+              kerberos method = secrets and keytab
+
     - name: Regenerar keytab de Kerberos
       ansible.builtin.shell: |
         net ads keytab create -U {{ domain_admin }}%{{ domain_admin_password }}
