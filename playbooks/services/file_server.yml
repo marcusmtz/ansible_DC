@@ -54,6 +54,37 @@
       register: realm_join
       changed_when: "'JOINED' in realm_join.stdout"
 
+    - name: Unir Samba al AD (cuenta de maquina)
+      ansible.builtin.shell: |
+        if ! net ads testjoin 2>/dev/null; then
+          echo "{{ domain_admin_password }}" | net ads join -U {{ domain_admin }}
+          echo "SAMBACREATED"
+        else
+          echo "SAMBAOK"
+        fi
+      args:
+        executable: /bin/bash
+      register: samba_join
+      changed_when: "'SAMBACREATED' in samba_join.stdout"
+
+    - name: Regenerar keytab de Kerberos
+      ansible.builtin.shell: |
+        net ads keytab create -U {{ domain_admin }}%{{ domain_admin_password }}
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Verificar keytab funciona
+      ansible.builtin.shell: |
+        hostname_upper=$(hostname | tr '[:lower:]' '[:upper:]')
+        klist -k /etc/krb5.keytab | grep -qi "$hostname_upper"
+      args:
+        executable: /bin/bash
+      register: keytab_check
+      changed_when: false
+      failed_when: false
+
     - name: Configurar nsswitch passwd con sss
       ansible.builtin.lineinfile:
         path: /etc/nsswitch.conf
@@ -71,29 +102,47 @@
         name: sssd
         state: restarted
         enabled: true
+      failed_when: false
 
     - name: Limpiar cache de SSSD para forzar lectura del AD
       ansible.builtin.command: sss_cache -E
       changed_when: false
+      failed_when: false
 
-    - name: Unir Samba al AD (cuenta de maquina)
+    - name: Verificar estado de SSSD
       ansible.builtin.shell: |
-        if ! net ads testjoin 2>/dev/null; then
-          echo "{{ domain_admin_password }}" | net ads join -U {{ domain_admin }}
-          echo "SAMBACREATED"
+        if systemctl is-active --quiet sssd; then
+          echo "SSSD_OK"
         else
-          echo "SAMBAOK"
+          echo "SSSD_FAILED"
+          systemctl restart sssd || true
+          sleep 2
+          if systemctl is-active --quiet sssd; then echo "SSSD_OK"; else echo "SSSD_FAILED"; fi
         fi
       args:
         executable: /bin/bash
-      register: samba_join
-      changed_when: "'SAMBACREATED' in samba_join.stdout"
+      register: sssd_status
+      changed_when: false
 
     - name: Habilitar e iniciar winbind
       ansible.builtin.systemd:
         name: winbind
         enabled: true
         state: started
+
+    - name: Verificar winbind corriendo
+      ansible.builtin.shell: |
+        if systemctl is-active --quiet winbind; then
+          echo "WINBIND_OK"
+        else
+          systemctl restart winbind || true
+          sleep 2
+          if systemctl is-active --quiet winbind; then echo "WINBIND_OK"; else echo "WINBIND_FAILED"; fi
+        fi
+      args:
+        executable: /bin/bash
+      register: winbind_status
+      changed_when: false
 
     - name: Crear carpetas de recursos compartidos
       ansible.builtin.file:
