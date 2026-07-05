@@ -1,0 +1,98 @@
+---
+- name: Crear scopes DHCP - Sede Arequipa
+  hosts: windows_domain
+  gather_facts: false
+
+  vars:
+    dhcp_scopes:
+      - scope_id: "192.169.10.0"
+        name: "AQP-VLAN10-Administracion"
+        start_range: "192.169.10.50"
+        end_range: "192.169.10.120"
+        subnet_mask: "255.255.255.128"
+        router: "192.169.10.1"
+        dns_servers: ["192.168.10.5", "192.168.10.6"]
+        lease_days: 8
+        lease_hours: 0
+        description: "Arequipa - Administracion - VLAN 10 - /25 (126 hosts)"
+
+      - scope_id: "192.169.20.0"
+        name: "AQP-VLAN20-Ventas"
+        start_range: "192.169.20.50"
+        end_range: "192.169.20.120"
+        subnet_mask: "255.255.255.128"
+        router: "192.169.20.1"
+        dns_servers: ["192.168.10.5", "192.168.10.6"]
+        lease_days: 8
+        lease_hours: 0
+        description: "Arequipa - Ventas - VLAN 20 - /25 (126 hosts)"
+
+      - scope_id: "192.169.30.0"
+        name: "AQP-VLAN30-Contabilidad"
+        start_range: "192.169.30.50"
+        end_range: "192.169.30.120"
+        subnet_mask: "255.255.255.128"
+        router: "192.169.30.1"
+        dns_servers: ["192.168.10.5", "192.168.10.6"]
+        lease_days: 8
+        lease_hours: 0
+        description: "Arequipa - Contabilidad - VLAN 30 - /25 (126 hosts)"
+
+  tasks:
+    - name: Esperar a WinRM
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 5985
+        timeout: 900
+      delegate_to: localhost
+      become: false
+
+    - name: Crear scope DHCP por VLAN
+      ansible.windows.win_shell: |
+        $scopeId = "{{ item.scope_id }}"
+        $existing = Get-DhcpServerv4Scope -ScopeId $scopeId -ErrorAction SilentlyContinue
+        if (-not $existing) {
+          Add-DhcpServerv4Scope `
+            -Name "{{ item.name }}" `
+            -StartRange "{{ item.start_range }}" `
+            -EndRange "{{ item.end_range }}" `
+            -SubnetMask "{{ item.subnet_mask }}" `
+            -Description "{{ item.description }}" `
+            -State Active
+          Write-Output "CREATED"
+        } else {
+          Write-Output "EXISTS"
+        }
+      loop: "{{ dhcp_scopes }}"
+      register: dhcp_scope_result
+      changed_when: "'CREATED' in dhcp_scope_result.stdout"
+
+    - name: Configurar opciones de scope DHCP (router, DNS y lease)
+      ansible.windows.win_shell: |
+        $scopeId = "{{ item.scope_id }}"
+        [string[]]$dnsServers = "{{ item.dns_servers | join(',') }}" -split ","
+        $expectedLease = [TimeSpan]::new({{ item.lease_days }}, {{ item.lease_hours }}, 0, 0)
+        $changed = $false
+
+        $currentRouter = (Get-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 3 -ErrorAction SilentlyContinue).Value
+        if (-not $currentRouter -or $currentRouter[0] -ne "{{ item.router }}") {
+          Set-DhcpServerv4OptionValue -ScopeId $scopeId -Router "{{ item.router }}" -Force
+          $changed = $true
+        }
+
+        $currentDns = (Get-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 6 -ErrorAction SilentlyContinue).Value
+        if (-not $currentDns -or (Compare-Object $currentDns $dnsServers)) {
+          Set-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 6 -Value $dnsServers -Force
+          $changed = $true
+        }
+
+        $currentLease = (Get-DhcpServerv4Scope -ScopeId $scopeId).LeaseDuration
+        if ($currentLease -ne $expectedLease) {
+          Set-DhcpServerv4Scope -ScopeId $scopeId -LeaseDuration $expectedLease
+          $changed = $true
+        }
+
+        if ($changed) { Write-Output "CONFIGURED" } else { Write-Output "EXISTS" }
+      loop: "{{ dhcp_scopes }}"
+      register: dhcp_opts_result
+      changed_when: "'CONFIGURED' in dhcp_opts_result.stdout"
