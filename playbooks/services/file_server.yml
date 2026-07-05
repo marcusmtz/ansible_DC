@@ -32,6 +32,7 @@
       ansible.builtin.apt:
         name:
           - samba
+          - winbind
           - krb5-user
           - realmd
           - adcli
@@ -75,6 +76,25 @@
       ansible.builtin.command: sss_cache -E
       changed_when: false
 
+    - name: Unir Samba al AD (cuenta de maquina)
+      ansible.builtin.shell: |
+        if ! net ads testjoin 2>/dev/null; then
+          echo "{{ domain_admin_password }}" | net ads join -U {{ domain_admin }}
+          echo "SAMBACREATED"
+        else
+          echo "SAMBAOK"
+        fi
+      args:
+        executable: /bin/bash
+      register: samba_join
+      changed_when: "'SAMBACREATED' in samba_join.stdout"
+
+    - name: Habilitar e iniciar winbind
+      ansible.builtin.systemd:
+        name: winbind
+        enabled: true
+        state: started
+
     - name: Crear carpetas de recursos compartidos
       ansible.builtin.file:
         path: "{{ item.path }}"
@@ -116,7 +136,7 @@
               directory mask = 0770
 
           {% endfor %}
-      notify: Restart samba
+      notify: [Restart samba, Restart winbind]
 
     - name: Validar configuracion de Samba
       ansible.builtin.command: testparm -s
@@ -139,4 +159,9 @@
     - name: Restart samba
       ansible.builtin.service:
         name: smbd
+        state: restarted
+
+    - name: Restart winbind
+      ansible.builtin.service:
+        name: winbind
         state: restarted
